@@ -1,5 +1,8 @@
 #include <stdio.h>
+#include "schedulingConfig.h"
 #include "pico/stdlib.h"
+
+
 
 
 int main()
