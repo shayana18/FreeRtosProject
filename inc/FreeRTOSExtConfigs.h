@@ -1,0 +1,7 @@
+#ifndef FREERTOS_EXT_CONFIGS_H
+#define FREERTOS_EXT_CONFIGS_H
+
+#define configUSE_EDF_SCHEDULER 1
+#define configUSE_SRP 0
+
+#endif /* FREERTOS_EXT_CONFIGS_H */

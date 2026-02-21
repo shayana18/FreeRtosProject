@@ -1,6 +1,8 @@
 #ifndef FREERTOS_CONFIG_H
 #define FREERTOS_CONFIG_H
 
+#include "FreeRTOSExtConfigs.h"
+
 /* Here is a good place to include header files that are required across
    your application. */
 #include <stdint.h>

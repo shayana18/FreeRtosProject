@@ -433,6 +433,13 @@ typedef struct tskTaskControlBlock       /* The old naming convention is used to
     #if ( configUSE_POSIX_ERRNO == 1 )
         int iTaskErrno;
     #endif
+
+    #if (configUSE_EDF_SCHEDULER == 1)
+        TickType_t xAbsoluteDeadline; /**< The absolute time at which the task's current job must be completed. */
+        TickType_t xPeriod; /**< The period of the task.  This is the time between the start of one job and the start of the next job. */
+        TickType_t xWCET; /**< The worst case execution time of the task's current job. */
+        TickType_t xDeadline; /**< The absolute time at which the task's current job must be completed. */
+    #endif
 } tskTCB;
 
 /* The old tskTCB name is maintained above then typedefed to the new TCB_t name
