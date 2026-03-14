@@ -27,6 +27,7 @@
  */
 
 /* Standard includes. */
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -265,13 +266,31 @@
  * Place the task represented by pxTCB into the appropriate ready list for
  * the task.  It is inserted at the end of the list.
  */
-#define prvAddTaskToReadyList( pxTCB )                                                                     \
-    do {                                                                                                   \
-        traceMOVED_TASK_TO_READY_STATE( pxTCB );                                                           \
-        taskRECORD_READY_PRIORITY( ( pxTCB )->uxPriority );                                                \
-        listINSERT_END( &( pxReadyTasksLists[ ( pxTCB )->uxPriority ] ), &( ( pxTCB )->xStateListItem ) ); \
-        tracePOST_MOVED_TASK_TO_READY_STATE( pxTCB );                                                      \
+#if ( configUSE_EDF == 1 )
+    /* Insert EDF tasks ordered by absolute deadline. */
+    #define EDF_READY_PRIORITY    ( ( UBaseType_t ) ( configMAX_PRIORITIES - 1U ) )
+    #undef prvAddTaskToReadyList
+    #define prvAddTaskToReadyList( pxTCB )                                               \
+    do {                                                                                 \
+        traceMOVED_TASK_TO_READY_STATE( pxTCB );                                        \
+        taskRECORD_READY_PRIORITY( EDF_READY_PRIORITY );                                \
+        listSET_LIST_ITEM_VALUE( &( ( pxTCB )->xStateListItem ),                        \
+                                 ( TickType_t ) ( ( pxTCB )->xAbsDeadline ) );          \
+        vListInsert( &( xReadyEDFTasksList ),                                            \
+                     &( ( pxTCB )->xStateListItem ) );                                  \
+        tracePOST_MOVED_TASK_TO_READY_STATE( pxTCB );                                   \
     } while( 0 )
+
+#elif (configUSE_EDF == 0)
+    #undef prvAddTaskToReadyList
+    #define prvAddTaskToReadyList( pxTCB )                                                                     \
+        do {                                                                                                   \
+            traceMOVED_TASK_TO_READY_STATE( pxTCB );                                                           \
+            taskRECORD_READY_PRIORITY( ( pxTCB )->uxPriority );                                                \
+            listINSERT_END( &( pxReadyTasksLists[ ( pxTCB )->uxPriority ] ), &( ( pxTCB )->xStateListItem ) ); \
+            tracePOST_MOVED_TASK_TO_READY_STATE( pxTCB );                                                      \
+        } while( 0 )
+#endif
 /*-----------------------------------------------------------*/
 
 /*
@@ -371,6 +390,16 @@ typedef struct tskTaskControlBlock       /* The old naming convention is used to
     ListItem_t xEventListItem;                  /**< Used to reference a task from an event list. */
     UBaseType_t uxPriority;                     /**< The priority of the task.  0 is the lowest priority. */
     StackType_t * pxStack;                      /**< Points to the start of the stack. */
+
+    #if (configUSE_EDF == 1)
+        TickType_t xAbsJobReleaseTime;       /**< Absolute release time of current job. */
+        TickType_t xPeriodTicks;             /**< Task period in ticks. */
+        TickType_t xWcetTicks;               /**< WCET budget in ticks. */
+        TickType_t xJobExecTicks;            /**< Number of ticks spent on current job. */
+        TickType_t xRelDeadline;             /**< Relative deadline in ticks. */
+        TickType_t xAbsDeadline;             /**< Absolute deadline in ticks. */
+        ListItem_t xEDFTaskListItem;         /**< Used to keep EDF tasks in the EDF task registry list. */
+    #endif
     #if ( configNUMBER_OF_CORES > 1 )
         volatile BaseType_t xTaskRunState;      /**< Used to identify the core the task is running on, if the task is running. Otherwise, identifies the task's state - not running or yielding. */
         UBaseType_t uxTaskAttributes;           /**< Task's attributes - currently used to identify the idle tasks. */
@@ -439,6 +468,11 @@ typedef struct tskTaskControlBlock       /* The old naming convention is used to
  * below to enable the use of older kernel aware debuggers. */
 typedef tskTCB TCB_t;
 
+typedef enum {
+    IMPLICIT_DEADLINE = 1U,
+    CONSTRAINED_DEADLINE = 2U
+} setDeadlineType;
+
 #if ( configNUMBER_OF_CORES == 1 )
     /* MISRA Ref 8.4.1 [Declaration shall be visible] */
     /* More details at: https://github.com/FreeRTOS/FreeRTOS-Kernel/blob/main/MISRA.md#rule-84 */
@@ -457,6 +491,10 @@ typedef tskTCB TCB_t;
  * doing so breaks some kernel aware debuggers and debuggers that rely on removing
  * the static qualifier. */
 PRIVILEGED_DATA static List_t pxReadyTasksLists[ configMAX_PRIORITIES ]; /**< Prioritised ready tasks. */
+#if configUSE_EDF == 1
+    PRIVILEGED_DATA static List_t xReadyEDFTasksList;
+    PRIVILEGED_DATA static List_t xEDFTaskRegistryList;
+#endif
 PRIVILEGED_DATA static List_t xDelayedTaskList1;                         /**< Delayed tasks. */
 PRIVILEGED_DATA static List_t xDelayedTaskList2;                         /**< Delayed tasks (two lists are used - one for delays that have overflowed the current tick count. */
 PRIVILEGED_DATA static List_t * volatile pxDelayedTaskList;              /**< Points to the delayed task list currently being used. */
@@ -525,6 +563,19 @@ PRIVILEGED_DATA static volatile configRUN_TIME_COUNTER_TYPE ulTotalRunTime[ conf
 /*-----------------------------------------------------------*/
 
 /* File private functions. --------------------------------*/
+
+#if ( configUSE_EDF == 1 )
+    static BaseType_t prvEDFValidateParams( TickType_t xT,
+                                            TickType_t xWCET,
+                                            TickType_t xRelD ) PRIVILEGED_FUNCTION;
+    static setDeadlineType prvEDFTaskSetDeadlineType( TickType_t xNewT,
+                                                      TickType_t xNewD ) PRIVILEGED_FUNCTION;
+    static BaseType_t prvEDFUtilTestWithNew( TickType_t xNewC,
+                                             TickType_t xNewT ) PRIVILEGED_FUNCTION;
+    static BaseType_t prvEDFDemandTestWithNew( TickType_t xNewC,
+                                               TickType_t xNewT,
+                                               TickType_t xNewD ) PRIVILEGED_FUNCTION;
+#endif
 
 /*
  * Creates the idle tasks during scheduler start.
@@ -1616,6 +1667,232 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
 #endif /* portUSING_MPU_WRAPPERS */
 /*-----------------------------------------------------------*/
 
+#if ( configUSE_EDF == 1 )
+    static BaseType_t prvEDFValidateParams( TickType_t xT,
+                                            TickType_t xWCET,
+                                            TickType_t xRelD )
+    {
+        if( ( xT > ( TickType_t ) 0U ) &&
+            ( xWCET > ( TickType_t ) 0U ) &&
+            ( xRelD > ( TickType_t ) 0U ) &&
+            ( xRelD <= xT ) )
+        {
+            return pdTRUE;
+        }
+
+        return pdFALSE;
+    }
+/*-----------------------------------------------------------*/
+
+    static setDeadlineType prvEDFTaskSetDeadlineType( TickType_t xNewT,
+                                                      TickType_t xNewD )
+    {
+        ListItem_t * pxItem;
+
+        if( xNewD != xNewT )
+        {
+            return CONSTRAINED_DEADLINE;
+        }
+
+        for( pxItem = listGET_HEAD_ENTRY( &xEDFTaskRegistryList );
+             pxItem != listGET_END_MARKER( &xEDFTaskRegistryList );
+             pxItem = listGET_NEXT( pxItem ) )
+        {
+            TCB_t * pxTCB = ( TCB_t * ) listGET_LIST_ITEM_OWNER( pxItem );
+
+            if( pxTCB->xRelDeadline != pxTCB->xPeriodTicks )
+            {
+                return CONSTRAINED_DEADLINE;
+            }
+        }
+
+        return IMPLICIT_DEADLINE;
+    }
+/*-----------------------------------------------------------*/
+
+    static BaseType_t prvEDFUtilTestWithNew( TickType_t xNewC,
+                                             TickType_t xNewT )
+    {
+        ListItem_t * pxItem;
+        uint64_t ullUtilQ32;
+        const uint64_t ullOneQ32 = ( uint64_t ) 1ULL << 32U;
+
+        /* For implicit deadlines (D=T), EDF is schedulable iff total utilization <= 1.
+         * This test is both necessary and sufficient in the uniprocessor model used here. */
+        ullUtilQ32 = ( ( uint64_t ) xNewC << 32U ) / ( uint64_t ) xNewT;
+
+        if( uxCurrentNumberOfTasks != ( UBaseType_t ) 0U )
+        {
+            for( pxItem = listGET_HEAD_ENTRY( &xEDFTaskRegistryList );
+                 pxItem != listGET_END_MARKER( &xEDFTaskRegistryList );
+                 pxItem = listGET_NEXT( pxItem ) )
+            {
+                TCB_t * pxTCB = ( TCB_t * ) listGET_LIST_ITEM_OWNER( pxItem );
+
+                if( pxTCB->xPeriodTicks == ( TickType_t ) 0U )
+                {
+                    return pdFALSE;
+                }
+
+                ullUtilQ32 += ( ( uint64_t ) pxTCB->xWcetTicks << 32U ) / ( uint64_t ) pxTCB->xPeriodTicks;
+            }
+        }
+
+        return ( ullUtilQ32 <= ullOneQ32 ) ? pdTRUE : pdFALSE;
+    }
+/*-----------------------------------------------------------*/
+
+    static uint64_t prvEDFComputeDemandAtTimeWithNew( uint64_t ullTime,
+                                                      TickType_t xNewC,
+                                                      TickType_t xNewT,
+                                                      TickType_t xNewD )
+    {
+        ListItem_t * pxItem;
+        uint64_t ullDemand = 0ULL;
+
+        if( ullTime >= ( uint64_t ) xNewD )
+        {
+            const uint64_t ullJobs = ( ( ullTime - ( uint64_t ) xNewD ) / ( uint64_t ) xNewT ) + 1ULL;
+            ullDemand += ullJobs * ( uint64_t ) xNewC;
+        }
+
+        if( uxCurrentNumberOfTasks != ( UBaseType_t ) 0U )
+        {
+            for( pxItem = listGET_HEAD_ENTRY( &xEDFTaskRegistryList );
+                 pxItem != listGET_END_MARKER( &xEDFTaskRegistryList );
+                 pxItem = listGET_NEXT( pxItem ) )
+            {
+                TCB_t * pxTCB = ( TCB_t * ) listGET_LIST_ITEM_OWNER( pxItem );
+
+                if( ullTime >= ( uint64_t ) pxTCB->xRelDeadline )
+                {
+                    const uint64_t ullJobs = ( ( ullTime - ( uint64_t ) pxTCB->xRelDeadline ) / ( uint64_t ) pxTCB->xPeriodTicks ) + 1ULL;
+                    ullDemand += ullJobs * ( uint64_t ) pxTCB->xWcetTicks;
+                }
+            }
+        }
+
+        return ullDemand;
+    }
+/*-----------------------------------------------------------*/
+
+    static BaseType_t prvEDFDemandTestWithNew( TickType_t xNewC,
+                                               TickType_t xNewT,
+                                               TickType_t xNewD )
+    {
+        ListItem_t * pxItem;
+        uint64_t ullL;
+        uint64_t ullIter;
+
+        /* For constrained deadlines (D<=T with some D<T), utilization alone is not sufficient.
+         * Use DBF analysis: for each candidate time t, the total demanded execution must satisfy dbf(t) <= t.
+         * This exact test is necessary and sufficient for uniprocessor EDF constrained-deadline task sets. */
+
+        /* Busy-period style feasibility interval upper bound. */
+        ullL = ( uint64_t ) xNewC;
+
+        if( uxCurrentNumberOfTasks != ( UBaseType_t ) 0U )
+        {
+            for( pxItem = listGET_HEAD_ENTRY( &xEDFTaskRegistryList );
+                 pxItem != listGET_END_MARKER( &xEDFTaskRegistryList );
+                 pxItem = listGET_NEXT( pxItem ) )
+            {
+                TCB_t * pxTCB = ( TCB_t * ) listGET_LIST_ITEM_OWNER( pxItem );
+                ullL += ( uint64_t ) pxTCB->xWcetTicks;
+            }
+        }
+
+        for( ullIter = 0ULL; ullIter < 1024ULL; ullIter++ )
+        {
+            uint64_t ullNext = 0ULL;
+
+            ullNext += ( ( ullL + ( uint64_t ) xNewT - 1ULL ) / ( uint64_t ) xNewT ) * ( uint64_t ) xNewC;
+
+            if( uxCurrentNumberOfTasks != ( UBaseType_t ) 0U )
+            {
+                for( pxItem = listGET_HEAD_ENTRY( &xEDFTaskRegistryList );
+                     pxItem != listGET_END_MARKER( &xEDFTaskRegistryList );
+                     pxItem = listGET_NEXT( pxItem ) )
+                {
+                    TCB_t * pxTCB = ( TCB_t * ) listGET_LIST_ITEM_OWNER( pxItem );
+                    ullNext += ( ( ullL + ( uint64_t ) pxTCB->xPeriodTicks - 1ULL ) / ( uint64_t ) pxTCB->xPeriodTicks ) * ( uint64_t ) pxTCB->xWcetTicks;
+                }
+            }
+
+            if( ullNext == ullL )
+            {
+                break;
+            }
+
+            if( ullNext > ( uint64_t ) portMAX_DELAY )
+            {
+                return pdFALSE;
+            }
+
+            ullL = ullNext;
+        }
+
+        if( ullIter == 1024ULL )
+        {
+            return pdFALSE;
+        }
+
+        /* Check all deadline points for each existing task. */
+        if( uxCurrentNumberOfTasks != ( UBaseType_t ) 0U )
+        {
+            for( pxItem = listGET_HEAD_ENTRY( &xEDFTaskRegistryList );
+                 pxItem != listGET_END_MARKER( &xEDFTaskRegistryList );
+                 pxItem = listGET_NEXT( pxItem ) )
+            {
+                TCB_t * pxTCB = ( TCB_t * ) listGET_LIST_ITEM_OWNER( pxItem );
+                uint64_t ullT = ( uint64_t ) pxTCB->xRelDeadline;
+                const uint64_t ullTi = ( uint64_t ) pxTCB->xPeriodTicks;
+
+                while( ullT <= ullL )
+                {
+                    if( prvEDFComputeDemandAtTimeWithNew( ullT, xNewC, xNewT, xNewD ) > ullT )
+                    {
+                        return pdFALSE;
+                    }
+
+                    if( ullT > ( ullL - ullTi ) )
+                    {
+                        break;
+                    }
+
+                    ullT += ullTi;
+                }
+            }
+        }
+
+        /* Check deadline points of the new task. */
+        {
+            uint64_t ullT = ( uint64_t ) xNewD;
+            const uint64_t ullTi = ( uint64_t ) xNewT;
+
+            while( ullT <= ullL )
+            {
+                if( prvEDFComputeDemandAtTimeWithNew( ullT, xNewC, xNewT, xNewD ) > ullT )
+                {
+                    return pdFALSE;
+                }
+
+                if( ullT > ( ullL - ullTi ) )
+                {
+                    break;
+                }
+
+                ullT += ullTi;
+            }
+        }
+
+        return pdTRUE;
+    }
+/*-----------------------------------------------------------*/
+
+#endif /* configUSE_EDF */
+/*-----------------------------------------------------------*/
+
 #if ( configSUPPORT_DYNAMIC_ALLOCATION == 1 )
     static TCB_t * prvCreateTask( TaskFunction_t pxTaskCode,
                                   const char * const pcName,
@@ -1714,42 +1991,139 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
         return pxNewTCB;
     }
 /*-----------------------------------------------------------*/
-
-    BaseType_t xTaskCreate( TaskFunction_t pxTaskCode,
-                            const char * const pcName,
-                            const configSTACK_DEPTH_TYPE uxStackDepth,
-                            void * const pvParameters,
-                            UBaseType_t uxPriority,
-                            TaskHandle_t * const pxCreatedTask )
-    {
-        TCB_t * pxNewTCB;
-        BaseType_t xReturn;
-
-        traceENTER_xTaskCreate( pxTaskCode, pcName, uxStackDepth, pvParameters, uxPriority, pxCreatedTask );
-
-        pxNewTCB = prvCreateTask( pxTaskCode, pcName, uxStackDepth, pvParameters, uxPriority, pxCreatedTask );
-
-        if( pxNewTCB != NULL )
+    #if configUSE_EDF == 0
+        BaseType_t xTaskCreate( TaskFunction_t pxTaskCode,
+                                const char * const pcName,
+                                const configSTACK_DEPTH_TYPE uxStackDepth,
+                                void * const pvParameters,
+                                UBaseType_t uxPriority,
+                                TaskHandle_t * const pxCreatedTask )
         {
-            #if ( ( configNUMBER_OF_CORES > 1 ) && ( configUSE_CORE_AFFINITY == 1 ) )
+            TCB_t * pxNewTCB;
+            BaseType_t xReturn;
+
+            traceENTER_xTaskCreate( pxTaskCode, pcName, uxStackDepth, pvParameters, uxPriority, pxCreatedTask );
+
+            pxNewTCB = prvCreateTask( pxTaskCode, pcName, uxStackDepth, pvParameters, uxPriority, pxCreatedTask );
+
+            if( pxNewTCB != NULL )
             {
-                /* Set the task's affinity before scheduling it. */
-                pxNewTCB->uxCoreAffinityMask = configTASK_DEFAULT_CORE_AFFINITY;
+                #if ( ( configNUMBER_OF_CORES > 1 ) && ( configUSE_CORE_AFFINITY == 1 ) )
+                {
+                    /* Set the task's affinity before scheduling it. */
+                    pxNewTCB->uxCoreAffinityMask = configTASK_DEFAULT_CORE_AFFINITY;
+                }
+                #endif
+
+                prvAddNewTaskToReadyList( pxNewTCB );
+                xReturn = pdPASS;
             }
-            #endif
+            else
+            {
+                xReturn = errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY;
+            }
 
-            prvAddNewTaskToReadyList( pxNewTCB );
-            xReturn = pdPASS;
+            traceRETURN_xTaskCreate( xReturn );
+
+            return xReturn;
         }
-        else
+    #elif ( configUSE_EDF == 1 )
+        BaseType_t xTaskCreate( TaskFunction_t pxTaskCode,
+                                       const char * const pcName,
+                                       const configSTACK_DEPTH_TYPE uxStackDepth,
+                                       void * const pvParameters,
+                                       TaskHandle_t * const pxCreatedTask,
+                                       uint32_t ulPeriodMs,
+                                       uint32_t ulWcetMs,
+                                       uint32_t ulRelDeadlineMs )
         {
-            xReturn = errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY;
+            TCB_t * pxNewTCB;
+            BaseType_t xReturn;
+            TickType_t xPeriodTicks, xWcetTicks, xRelDeadlineTicks;
+
+            xPeriodTicks = pdMS_TO_TICKS( ulPeriodMs );
+            xWcetTicks = pdMS_TO_TICKS( ulWcetMs );
+            xRelDeadlineTicks = pdMS_TO_TICKS( ulRelDeadlineMs );
+
+            traceENTER_xTaskCreate( pxTaskCode, pcName, uxStackDepth, pvParameters, ( configMAX_PRIORITIES - 1 ), pxCreatedTask );
+
+            if( prvEDFValidateParams( xPeriodTicks, xWcetTicks, xRelDeadlineTicks ) == pdFALSE )
+            {
+                traceRETURN_xTaskCreate( pdFAIL );
+                return pdFAIL;
+            }
+
+            {
+                BaseType_t xAdmissionResult;
+                const BaseType_t xSchedulerWasRunning = xSchedulerRunning;
+                setDeadlineType xDeadlineType;
+
+                if( xSchedulerWasRunning != pdFALSE )
+                {
+                    /* Freeze scheduling so admission checks see a stable EDF task set snapshot. */
+                    vTaskSuspendAll();
+                }
+
+                xDeadlineType = prvEDFTaskSetDeadlineType( xPeriodTicks, xRelDeadlineTicks );
+
+                if( xDeadlineType == IMPLICIT_DEADLINE )
+                {
+                    xAdmissionResult = prvEDFUtilTestWithNew( xWcetTicks, xPeriodTicks );
+                }
+                else if( xDeadlineType == CONSTRAINED_DEADLINE )
+                {
+                    xAdmissionResult = prvEDFDemandTestWithNew( xWcetTicks, xPeriodTicks, xRelDeadlineTicks );
+                }
+
+                if( xSchedulerWasRunning != pdFALSE )
+                {
+                    /* Resume normal scheduling after the admission decision is complete. */
+                    ( void ) xTaskResumeAll();
+                }
+
+                if( xAdmissionResult == pdFALSE )
+                {
+                    traceRETURN_xTaskCreate( pdFAIL );
+                    return pdFAIL;
+                }
+            }
+
+            pxNewTCB = prvCreateTask( pxTaskCode, pcName, uxStackDepth, pvParameters, ( configMAX_PRIORITIES - 1 ), pxCreatedTask );
+            if( pxNewTCB != NULL )
+            {
+                #if ( ( configNUMBER_OF_CORES > 1 ) && ( configUSE_CORE_AFFINITY == 1 ) )
+                {
+                    /* Set the task's affinity before scheduling it. */
+                    pxNewTCB->uxCoreAffinityMask = configTASK_DEFAULT_CORE_AFFINITY;
+                }
+                #endif
+
+                /* EDF metadata used for release/deadline management. */
+                TickType_t curr_tick = xTaskGetTickCount(); 
+                pxNewTCB->xAbsJobReleaseTime = curr_tick;
+                pxNewTCB->xPeriodTicks = xPeriodTicks;
+                pxNewTCB->xJobExecTicks = (TickType_t)0U; 
+                pxNewTCB->xWcetTicks = xWcetTicks;
+                pxNewTCB->xRelDeadline = xRelDeadlineTicks;
+                pxNewTCB->xAbsDeadline = curr_tick + xRelDeadlineTicks;
+                listSET_LIST_ITEM_VALUE( &( pxNewTCB->xEDFTaskListItem ),
+                                         pxNewTCB->xAbsJobReleaseTime );
+                vListInsert( &xEDFTaskRegistryList,
+                             &( pxNewTCB->xEDFTaskListItem ) );
+
+                prvAddNewTaskToReadyList( pxNewTCB );
+                xReturn = pdPASS;
+            }
+            else
+            {
+                xReturn = errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY;
+            }
+
+            traceRETURN_xTaskCreate( xReturn );
+
+            return xReturn;
         }
-
-        traceRETURN_xTaskCreate( xReturn );
-
-        return xReturn;
-    }
+    #endif
 /*-----------------------------------------------------------*/
 
     #if ( ( configNUMBER_OF_CORES > 1 ) && ( configUSE_CORE_AFFINITY == 1 ) )
@@ -1907,8 +2281,24 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
     }
     #endif /* configUSE_MUTEXES */
 
+    #if ( configUSE_EDF == 1 )
+    {
+        /* Default non-EDF/internal tasks to the farthest deadline in EDF mode. */
+        pxNewTCB->xAbsJobReleaseTime = xTickCount;
+        pxNewTCB->xPeriodTicks = ( TickType_t ) 0U;
+        pxNewTCB->xWcetTicks = ( TickType_t ) 0U;
+        pxNewTCB->xRelDeadline = portMAX_DELAY;
+        pxNewTCB->xAbsDeadline = portMAX_DELAY;
+    }
+    #endif
+
     vListInitialiseItem( &( pxNewTCB->xStateListItem ) );
     vListInitialiseItem( &( pxNewTCB->xEventListItem ) );
+    #if ( configUSE_EDF == 1 )
+    {
+        vListInitialiseItem( &( pxNewTCB->xEDFTaskListItem ) );
+    }
+    #endif
 
     /* Set the pxNewTCB as a link back from the ListItem_t.  This is so we can get
      * back to  the containing TCB from a generic item in a list. */
@@ -1917,6 +2307,11 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
     /* Event lists are always in priority order. */
     listSET_LIST_ITEM_VALUE( &( pxNewTCB->xEventListItem ), ( TickType_t ) configMAX_PRIORITIES - ( TickType_t ) uxPriority );
     listSET_LIST_ITEM_OWNER( &( pxNewTCB->xEventListItem ), pxNewTCB );
+    #if ( configUSE_EDF == 1 )
+    {
+        listSET_LIST_ITEM_OWNER( &( pxNewTCB->xEDFTaskListItem ), pxNewTCB );
+    }
+    #endif
 
     #if ( portUSING_MPU_WRAPPERS == 1 )
     {
@@ -2049,10 +2444,17 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
                  * so far. */
                 if( xSchedulerRunning == pdFALSE )
                 {
-                    if( pxCurrentTCB->uxPriority <= pxNewTCB->uxPriority )
-                    {
-                        pxCurrentTCB = pxNewTCB;
-                    }
+                    #if configUSE_EDF == 0 // base use 
+                        if( pxCurrentTCB->uxPriority <= pxNewTCB->uxPriority )
+                        {
+                            pxCurrentTCB = pxNewTCB;
+                        }
+                    #elif configUSE_EDF == 1
+                        if( pxCurrentTCB->xAbsDeadline > pxNewTCB->xAbsDeadline )
+                        {
+                            pxCurrentTCB = pxNewTCB;
+                        }
+                    #endif
                     else
                     {
                         mtCOVERAGE_TEST_MARKER();
@@ -2221,6 +2623,19 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
             {
                 mtCOVERAGE_TEST_MARKER();
             }
+
+            #if ( configUSE_EDF == 1 )
+            {
+                if( listLIST_ITEM_CONTAINER( &( pxTCB->xEDFTaskListItem ) ) != NULL )
+                {
+                    ( void ) uxListRemove( &( pxTCB->xEDFTaskListItem ) );
+                }
+                else
+                {
+                    mtCOVERAGE_TEST_MARKER();
+                }
+            }
+            #endif
 
             /* Increment the uxTaskNumber also so kernel aware debuggers can
              * detect that the task lists need re-generating.  This is done before
@@ -2395,6 +2810,24 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
 
             /* Update the wake time ready for the next call. */
             *pxPreviousWakeTime = xTimeToWake;
+
+            #if ( configUSE_EDF == 1 )
+            {
+                /* Only tasks registered as EDF periodic tasks update EDF release/deadline metadata. */
+                if( listLIST_ITEM_CONTAINER( &( pxCurrentTCB->xEDFTaskListItem ) ) == &xEDFTaskRegistryList )
+                {
+                    pxCurrentTCB->xAbsJobReleaseTime = xTimeToWake;
+                    pxCurrentTCB->xAbsDeadline = xTimeToWake + pxCurrentTCB->xRelDeadline;
+                    pxCurrentTCB->xJobExecTicks = ( TickType_t ) 0U;
+
+                    ( void ) uxListRemove( &( pxCurrentTCB->xEDFTaskListItem ) );
+                    listSET_LIST_ITEM_VALUE( &( pxCurrentTCB->xEDFTaskListItem ),
+                                             pxCurrentTCB->xAbsJobReleaseTime );
+                    vListInsert( &xEDFTaskRegistryList,
+                                 &( pxCurrentTCB->xEDFTaskListItem ) );
+                }
+            }
+            #endif
 
             if( xShouldDelay != pdFALSE )
             {
@@ -4000,9 +4433,12 @@ BaseType_t xTaskResumeAll( void )
 
                         #if ( configNUMBER_OF_CORES == 1 )
                         {
-                            /* If the moved task has a priority higher than the current
-                             * task then a yield must be performed. */
-                            if( pxTCB->uxPriority > pxCurrentTCB->uxPriority )
+                            /* Trigger a yield when the readied task should run now. */
+                            #if ( configUSE_EDF == 1 )
+                                if( pxTCB->xAbsDeadline < pxCurrentTCB->xAbsDeadline )
+                            #else
+                                if( pxTCB->uxPriority > pxCurrentTCB->uxPriority )
+                            #endif
                             {
                                 xYieldPendings[ xCoreID ] = pdTRUE;
                             }
@@ -4698,6 +5134,51 @@ BaseType_t xTaskIncrementTick( void )
          * delayed lists if it wraps to 0. */
         xTickCount = xConstTickCount;
 
+        #if ( configUSE_EDF == 1 )
+        {
+            /* Single-core EDF budget enforcement is based on the task that was
+             * executing when the tick interrupt fired. */
+            if( listLIST_ITEM_CONTAINER( &( pxCurrentTCB->xEDFTaskListItem ) ) == &xEDFTaskRegistryList )
+            {
+                BaseType_t xStopCurrentJob = pdFALSE;
+
+                pxCurrentTCB->xJobExecTicks++;
+
+                if( xConstTickCount > pxCurrentTCB->xAbsDeadline )
+                {
+                    xStopCurrentJob = pdTRUE;
+                }
+                else if( pxCurrentTCB->xJobExecTicks >= pxCurrentTCB->xWcetTicks )
+                {
+                    xStopCurrentJob = pdTRUE;
+                }
+
+                if( xStopCurrentJob != pdFALSE )
+                {
+                    TickType_t xNextReleaseTime = pxCurrentTCB->xAbsJobReleaseTime + pxCurrentTCB->xPeriodTicks;
+
+                    while( xNextReleaseTime <= xConstTickCount )
+                    {
+                        xNextReleaseTime += pxCurrentTCB->xPeriodTicks;
+                    }
+
+                    pxCurrentTCB->xAbsJobReleaseTime = xNextReleaseTime;
+                    pxCurrentTCB->xAbsDeadline = xNextReleaseTime + pxCurrentTCB->xRelDeadline;
+                    pxCurrentTCB->xJobExecTicks = ( TickType_t ) 0U;
+
+                    ( void ) uxListRemove( &( pxCurrentTCB->xEDFTaskListItem ) );
+                    listSET_LIST_ITEM_VALUE( &( pxCurrentTCB->xEDFTaskListItem ),
+                                             pxCurrentTCB->xAbsJobReleaseTime );
+                    vListInsert( &xEDFTaskRegistryList,
+                                 &( pxCurrentTCB->xEDFTaskListItem ) );
+
+                    prvAddCurrentTaskToDelayedList( xNextReleaseTime - xConstTickCount, pdFALSE );
+                    xSwitchRequired = pdTRUE;
+                }
+            }
+        }
+        #endif
+
         if( xConstTickCount == ( TickType_t ) 0U )
         {
             taskSWITCH_DELAYED_LISTS();
@@ -4776,15 +5257,13 @@ BaseType_t xTaskIncrementTick( void )
                     {
                         #if ( configNUMBER_OF_CORES == 1 )
                         {
-                            /* Preemption is on, but a context switch should
-                             * only be performed if the unblocked task's
-                             * priority is higher than the currently executing
-                             * task.
-                             * The case of equal priority tasks sharing
-                             * processing time (which happens when both
-                             * preemption and time slicing are on) is
-                             * handled below.*/
-                            if( pxTCB->uxPriority > pxCurrentTCB->uxPriority )
+                            /* Preemption is on, switch only if the unblocked task
+                             * should run ahead of the current task. */
+                            #if ( configUSE_EDF == 1 )
+                                if( pxTCB->xAbsDeadline < pxCurrentTCB->xAbsDeadline )
+                            #else
+                                if( pxTCB->uxPriority > pxCurrentTCB->uxPriority )
+                            #endif
                             {
                                 xSwitchRequired = pdTRUE;
                             }
@@ -5111,7 +5590,24 @@ BaseType_t xTaskIncrementTick( void )
             /* MISRA Ref 11.5.3 [Void pointer assignment] */
             /* More details at: https://github.com/FreeRTOS/FreeRTOS-Kernel/blob/main/MISRA.md#rule-115 */
             /* coverity[misra_c_2012_rule_11_5_violation] */
-            taskSELECT_HIGHEST_PRIORITY_TASK();
+            #if ( configUSE_EDF == 1 )
+            {
+                if( listLIST_IS_EMPTY( &xReadyEDFTasksList ) == pdFALSE )
+                {
+                    /* EDF ready list is sorted by absolute deadline, so head is next to run. */
+                    TCB_t * pxTCB = ( TCB_t * ) listGET_OWNER_OF_HEAD_ENTRY( &xReadyEDFTasksList );
+                    pxCurrentTCB = pxTCB;
+                }
+                else
+                {
+                    taskSELECT_HIGHEST_PRIORITY_TASK();
+                }
+            }
+            #else
+            {
+                taskSELECT_HIGHEST_PRIORITY_TASK();
+            }
+            #endif
             traceTASK_SWITCHED_IN();
 
             /* Macro to inject port specific behaviour immediately after
@@ -6020,6 +6516,13 @@ static void prvInitialiseTaskLists( void )
     vListInitialise( &xDelayedTaskList1 );
     vListInitialise( &xDelayedTaskList2 );
     vListInitialise( &xPendingReadyList );
+
+    #if ( configUSE_EDF == 1 )
+    {
+        vListInitialise( &xReadyEDFTasksList );
+        vListInitialise( &xEDFTaskRegistryList );
+    }
+    #endif
 
     #if ( INCLUDE_vTaskDelete == 1 )
     {

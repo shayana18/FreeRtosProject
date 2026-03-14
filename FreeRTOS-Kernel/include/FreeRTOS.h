@@ -3194,6 +3194,15 @@ typedef struct xSTATIC_TCB
     #if ( configUSE_POSIX_ERRNO == 1 )
         int iDummy22;
     #endif
+    #if (configUSE_EDF == 1)
+        TickType_t xAbsJobReleaseTime;       /**< Absolute release time of current job. */
+        TickType_t xPeriodTicks;             /**< Task period in ticks. */
+        TickType_t xWcetTicks;               /**< WCET budget in ticks. */
+        TickType_t xJobExecTicks;            /**< Number of ticks spent on current job. */
+        TickType_t xRelDeadline;             /**< Relative deadline in ticks. */
+        TickType_t xAbsDeadline;             /**< Absolute deadline in ticks. */
+        StaticListItem_t xEDFTaskListItem;   /**< Mirrors TCB_t::xEDFTaskListItem for static allocation size compatibility. */
+    #endif  
 } StaticTask_t;
 
 /*

@@ -28,7 +28,6 @@ set(PICO_BOARD pico CACHE STRING "Board type")
 #creating path to freeRtos lib to import from 
 set(FREE_RTOS_KERNEL_INCLUDE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS-Kernel/portable/ThirdParty/GCC/RP2040)
 
-
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 include(${FREE_RTOS_KERNEL_INCLUDE_PATH}/FreeRTOS_Kernel_import.cmake)
@@ -39,11 +38,23 @@ project(FreeRtosProject C CXX ASM)
 pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
+add_executable(${PROJECT_NAME}
+    main.c
+)
 
-add_subdirectory(src)
+target_include_directories(${PROJECT_NAME} PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}
+)
+
+target_link_libraries(${PROJECT_NAME}
+    pico_stdlib
+    FreeRTOS-Kernel-Heap4
+)
 
 pico_set_program_name(FreeRtosProject "FreeRtosProject")
 pico_set_program_version(FreeRtosProject "0.1")
+
+pico_add_extra_outputs(${PROJECT_NAME})
 
 # Modify the below lines to enable/disable output over UART/USB
 pico_enable_stdio_uart(FreeRtosProject 0)
