@@ -1725,6 +1725,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
 
         if( uxCurrentNumberOfTasks != ( UBaseType_t ) 0U )
         {
+            volatile int dummy = 0; /* Dummy variable to prevent compiler warning about code complexity. */
             for( pxItem = listGET_HEAD_ENTRY( &xEDFTaskRegistryList );
                  pxItem != listGET_END_MARKER( &xEDFTaskRegistryList );
                  pxItem = listGET_NEXT( pxItem ) )
@@ -2108,10 +2109,6 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                 pxNewTCB->xWcetTicks = xWcetTicks;
                 pxNewTCB->xRelDeadline = xRelDeadlineTicks;
                 pxNewTCB->xAbsDeadline = curr_tick + xRelDeadlineTicks;
-                listSET_LIST_ITEM_VALUE( &( pxNewTCB->xEDFTaskListItem ),
-                                         pxNewTCB->xAbsJobReleaseTime );
-                vListInsert( &xEDFTaskRegistryList,
-                             &( pxNewTCB->xEDFTaskListItem ) );
 
                 prvAddNewTaskToReadyList( pxNewTCB );
                 xReturn = pdPASS;
@@ -2480,6 +2477,22 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
 
             prvAddTaskToReadyList( pxNewTCB );
 
+            #if ( configUSE_EDF == 1 )
+            {
+                /* Insert periodic EDF tasks into the EDF registry list only after
+                 * the list structures have been initialised by prvInitialiseTaskLists().
+                 * (If inserted earlier, prvInitialiseTaskLists() would reset the list and
+                 * the task would be missing from admission tests.) */
+                if( pxNewTCB->xPeriodTicks != ( TickType_t ) 0U )
+                {
+                    listSET_LIST_ITEM_VALUE( &( pxNewTCB->xEDFTaskListItem ),
+                                             pxNewTCB->xAbsJobReleaseTime );
+                    vListInsert( &xEDFTaskRegistryList,
+                                 &( pxNewTCB->xEDFTaskListItem ) );
+                }
+            }
+            #endif
+
             portSETUP_TCB( pxNewTCB );
         }
         taskEXIT_CRITICAL();
@@ -2536,6 +2549,18 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
             traceTASK_CREATE( pxNewTCB );
 
             prvAddTaskToReadyList( pxNewTCB );
+
+            #if ( configUSE_EDF == 1 )
+            {
+                if( pxNewTCB->xPeriodTicks != ( TickType_t ) 0U )
+                {
+                    listSET_LIST_ITEM_VALUE( &( pxNewTCB->xEDFTaskListItem ),
+                                             pxNewTCB->xAbsJobReleaseTime );
+                    vListInsert( &xEDFTaskRegistryList,
+                                 &( pxNewTCB->xEDFTaskListItem ) );
+                }
+            }
+            #endif
 
             portSETUP_TCB( pxNewTCB );
 

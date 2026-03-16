@@ -1,90 +1,36 @@
-#include <stdio.h>
-
-#include "pico/stdlib.h"
 #include "schedulingConfig.h"
-#include "FreeRTOS.h"
-#include "task.h"
-#include "task_trace.h"
 
-#define TASK1_WORK_MS    1500u
-#define TASK2_WORK_MS    1500u
-#define TASK3_WORK_MS    2000u
-
-static void spin_ms(uint32_t target_ms)
-{
-    uint32_t executed_us = 0;
-    uint32_t prev_us = time_us_32();
-
-    while (executed_us < target_ms * 1000u)
-    {
-        uint32_t now_us = time_us_32();
-        uint32_t delta_us = now_us - prev_us;
-
-        if (delta_us < 100u)
-        {
-            executed_us += delta_us;
-        }
-
-        prev_us = now_us;
-    }
-}
-
-
-static void Task1( void * pvParameters )
-{
-    ( void ) pvParameters;
-
-    vTaskSetApplicationTaskTag( NULL, ( TaskHookFunction_t ) 1 );
-
-    for( ;; )
-    {
-        spin_ms( TASK1_WORK_MS );
-        volatile int x = 1U; 
-    }
-}
-
-static void Task2( void * pvParameters )
-{
-    ( void ) pvParameters;
-
-    vTaskSetApplicationTaskTag( NULL, ( TaskHookFunction_t ) 2 );
-
-    for( ;; )
-    {
-        spin_ms(TASK2_WORK_MS);
-    }
-}
-
-static void Task3( void * pvParameters )
-{
-    ( void ) pvParameters;
-
-    vTaskSetApplicationTaskTag( NULL, ( TaskHookFunction_t ) 4 );
-
-    for( ;; )
-    {
-        spin_ms(TASK3_WORK_MS);
-    }
-}
+#if ( configUSE_EDF == 1 )
+    #include "edf_tests/test_1.h"
+    #include "edf_tests/test_2.h"
+    #include "edf_tests/test_3.h"
+    #include "edf_tests/test_4.h"
+    #include "edf_tests/test_5.h"
+    #include "edf_tests/test_6.h"
+#endif
 
 int main( void )
 {
-    stdio_init_all();
-    vTraceTaskPinsInit();
+    #if ( configUSE_EDF == 1 )
+        /* Uncomment this single line to run the EDF test case. */
+        // Simple edf implicit deadlinetest case with 3 tasks added at startup with a fairly low utilization.
+        // test_1_run(); 
 
-    TaskHandle_t xTask1Handle = NULL;
-    TaskHandle_t xTask2Handle = NULL;
-    TaskHandle_t xTask3Handle = NULL;
+        // Higher utilization (but still < 1.0) edf implicit deadline test with 4 tasks added at startup.
+        // test_2_run(); 
 
-    xTaskCreate( Task1, "Test Task 1", 256, NULL, &xTask1Handle, 5000, 1500, 5000 );
-    xTaskCreate( Task2, "Test Task 2", 256, NULL, &xTask2Handle, 7000, 1500, 7000 );
-    xTaskCreate( Task3, "Test Task 3", 256, NULL, &xTask3Handle, 8000, 2000, 8000 );
+        // EDF admission control test, attempts to add unschedulable task at startup and after 10s, then adds a schedulable task.
+        // test_3_run(); 
 
-    vTaskSetApplicationTaskTag( xTask1Handle, ( TaskHookFunction_t ) 1 );
-    vTaskSetApplicationTaskTag( xTask2Handle, ( TaskHookFunction_t ) 2 );
-    vTaskSetApplicationTaskTag( xTask3Handle, ( TaskHookFunction_t ) 4 );
+        // Explicit deadline EDF test with 3 tasks (D != T).
+        // test_4_run();
 
-    vTaskStartScheduler();
+        // Higher utilization explicit deadline EDF test with 4 tasks (D < T).
+        //  test_5_run(); 
+
+        // Explicit deadline admission control test (expected reject then accept).
+        // test_6_run(); 
+    #endif
 
     for( ;; )
     {

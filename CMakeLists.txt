@@ -37,9 +37,16 @@ project(FreeRtosProject C CXX ASM)
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
+# Build all EDF test sources under edf_tests/.
+# (CONFIGURE_DEPENDS makes CMake re-run when files are added/removed.)
+file(GLOB EDF_TEST_SOURCES CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_LIST_DIR}/edf_tests/*.c
+)
+
 # Add executable. Default name is the project name, version 0.1
 add_executable(${PROJECT_NAME}
     main.c
+    ${EDF_TEST_SOURCES}
     task_trace.c
 )
 
