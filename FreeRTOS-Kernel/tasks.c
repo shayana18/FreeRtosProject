@@ -5600,7 +5600,7 @@ BaseType_t xTaskIncrementTick( void )
                     TCB_t * pxTCB = ( TCB_t * ) listGET_OWNER_OF_HEAD_ENTRY( &xReadyEDFTasksList );
                     pxCurrentTCB = pxTCB;
                 }
-                else
+                else // if we dont have any edf tasks then schedule using fixed priority
                 {
                     taskSELECT_HIGHEST_PRIORITY_TASK();
                 }
