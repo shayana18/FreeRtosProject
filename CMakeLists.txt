@@ -40,6 +40,7 @@ pico_sdk_init()
 # Add executable. Default name is the project name, version 0.1
 add_executable(${PROJECT_NAME}
     main.c
+    task_trace.c
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE

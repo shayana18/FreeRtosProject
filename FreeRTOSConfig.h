@@ -24,6 +24,7 @@
 #define configUSE_MUTEXES                                           0
 #define configUSE_RECURSIVE_MUTEXES                                 0
 #define configUSE_COUNTING_SEMAPHORES                               0
+#define configUSE_APPLICATION_TASK_TAG                              1
 #define configUSE_ALTERNATIVE_API                                   0 /* Deprecated! */
 #define configQUEUE_REGISTRY_SIZE                                   10
 #define configUSE_QUEUE_SETS                                        0
@@ -122,6 +123,7 @@
 #define INCLUDE_xTaskGetHandle                  0
 #define INCLUDE_xTaskResumeFromISR              1
 
-/* A header file that defines trace macro can be included here. */
+/* A header file that defines trace macros can be included here. */
+#include "task_trace.h"
 
 #endif /*FREERTOS_CONFIG_H*/

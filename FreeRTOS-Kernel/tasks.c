@@ -1693,16 +1693,18 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
         {
             return CONSTRAINED_DEADLINE;
         }
-
-        for( pxItem = listGET_HEAD_ENTRY( &xEDFTaskRegistryList );
-             pxItem != listGET_END_MARKER( &xEDFTaskRegistryList );
-             pxItem = listGET_NEXT( pxItem ) )
+        if ( listLIST_IS_INITIALISED( &xEDFTaskRegistryList ) == pdTRUE )
         {
-            TCB_t * pxTCB = ( TCB_t * ) listGET_LIST_ITEM_OWNER( pxItem );
-
-            if( pxTCB->xRelDeadline != pxTCB->xPeriodTicks )
+            for( pxItem = listGET_HEAD_ENTRY( &xEDFTaskRegistryList );
+                pxItem != listGET_END_MARKER( &xEDFTaskRegistryList );
+                pxItem = listGET_NEXT( pxItem ) )
             {
-                return CONSTRAINED_DEADLINE;
+                TCB_t * pxTCB = ( TCB_t * ) listGET_LIST_ITEM_OWNER( pxItem );
+
+                if( pxTCB->xRelDeadline != pxTCB->xPeriodTicks )
+                {
+                    return CONSTRAINED_DEADLINE;
+                }
             }
         }
 
