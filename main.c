@@ -7,6 +7,7 @@
     #include "edf_tests/test_4.h"
     #include "edf_tests/test_5.h"
     #include "edf_tests/test_6.h"
+    #include "edf_tests/test_7.h"
 #endif
 
 int main( void )
@@ -22,14 +23,17 @@ int main( void )
         // EDF admission control test, attempts to add unschedulable task at startup and after 10s, then adds a schedulable task.
         // test_3_run(); 
 
-        // Explicit deadline EDF test with 3 tasks (D != T).
+        // Constrained deadline EDF test with 3 tasks (D != T).
         // test_4_run();
 
-        // Higher utilization explicit deadline EDF test with 4 tasks (D < T).
+        // Higher utilization Constrained deadline EDF test with 4 tasks (D < T).
         //  test_5_run(); 
 
-        // Explicit deadline admission control test (expected reject then accept).
-        // test_6_run(); 
+        // Constrained deadline admission control test (expected reject then accept).
+        // test_6_run();
+
+        // Implicit deadline admission control test (utilization path: expected reject then accept).
+        test_7_run();
     #endif
 
     for( ;; )

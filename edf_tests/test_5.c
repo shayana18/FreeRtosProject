@@ -14,7 +14,7 @@
 
 #include "edf_tests/test_utils.h"
 
-/* Explicit deadlines (D != T) with higher utilization.
+/* Constrianed deadlines (D != T) with higher utilization.
  *
  * Task set:
  *  - T1: C=1200, T=4000,  D=3000

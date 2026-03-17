@@ -14,7 +14,7 @@ void spin_ms(uint32_t target_ms)
         uint32_t now_us = time_us_32();
         uint32_t delta_us = now_us - prev_us;
 
-        if (delta_us < 100u)
+        if (delta_us < 100u) // if delta is larger than 100u that means a preemption happened so we stop accumulaing 
         {
             executed_us += delta_us;
         }
