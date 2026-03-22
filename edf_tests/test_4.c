@@ -12,7 +12,7 @@
 
 #include "task_trace.h"
 
-#include "edf_tests/test_utils.h"
+#include "test_utils.h"
 
 /* Constrained deadlines (D != T) with moderate utilization.
  *
@@ -72,7 +72,7 @@ static void Task3(void *pvParameters)
     }
 }
 
-void test_4_run(void)
+void edf_4_run(void)
 {
     stdio_init_all();
     vTraceTaskPinsInit();

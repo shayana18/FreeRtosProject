@@ -12,7 +12,7 @@
 
 #include "task_trace.h"
 
-#include "edf_tests/test_utils.h"
+#include "test_utils.h"
 
 #define TASK1_WORK_MS    1500u
 #define TASK2_WORK_MS    1500u
@@ -56,7 +56,7 @@ static void Task3(void *pvParameters)
     }
 }
 
-void test_1_run(void)
+void edf_1_run(void)
 {
     stdio_init_all();
     vTraceTaskPinsInit();

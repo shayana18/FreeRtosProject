@@ -13,7 +13,7 @@
 
 #include "task_trace.h"
 
-#include "edf_tests/test_utils.h"
+#include "test_utils.h"
 
 /* Admission control test using constrained deadlines (D < T).
  *
@@ -101,7 +101,7 @@ static void GoodTask(void *pvParameters)
 }
 
 
-void test_6_run(void)
+void edf_6_run(void)
 {
     stdio_init_all();
     vTraceTaskPinsInit();

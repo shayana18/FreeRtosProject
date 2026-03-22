@@ -11,7 +11,7 @@
  *
  * Intended usage: call once from main(). This function does not return.
  */
-void test_6_run(void);
+void edf_6_run(void);
 #else
-static inline void test_6_run(void) {}
+static inline void edf_6_run(void) {}
 #endif

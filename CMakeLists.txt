@@ -48,6 +48,7 @@ add_executable(${PROJECT_NAME}
     main.c
     ${EDF_TEST_SOURCES}
     task_trace.c
+    test_utils.c
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE

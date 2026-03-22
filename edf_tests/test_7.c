@@ -12,7 +12,7 @@
 
 #include "task_trace.h"
 
-#include "edf_tests/test_utils.h"
+#include "test_utils.h"
 
 /* Admission control test for implicit deadlines (D = T).
  *
@@ -94,7 +94,7 @@ static void GoodTask( void * pvParameters )
     }
 }
 
-void test_7_run( void )
+void edf_7_run( void )
 {
     stdio_init_all();
     vTraceTaskPinsInit();

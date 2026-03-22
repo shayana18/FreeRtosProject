@@ -12,7 +12,7 @@
 
 #include "task_trace.h"
 
-#include "edf_tests/test_utils.h"
+#include "test_utils.h"
 
 /* Higher (but < 1.0) total utilization with implicit deadlines (D = T).
  * Harmonic periods make hand-verification easier.
@@ -78,7 +78,7 @@ static void Task4(void *pvParameters)
     }
 }
 
-void test_2_run(void)
+void edf_2_run(void)
 {
     stdio_init_all();
     vTraceTaskPinsInit();

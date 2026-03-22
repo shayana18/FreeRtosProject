@@ -12,7 +12,7 @@
 
 #include "task_trace.h"
 
-#include "edf_tests/test_utils.h"
+#include "test_utils.h"
 
 /* Hand-verifiable harmonic timing with implicit deadlines (D = T).
  * Baseline utilization: 1/2 + 1/4 + 1/10 = 0.85.
@@ -130,7 +130,7 @@ static void AdmissionControllerTask(void *pvParameters)
     }
 }
 
-void test_3_run(void)
+void edf_3_run(void)
 {
     stdio_init_all();
     vTraceTaskPinsInit();

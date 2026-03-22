@@ -13,28 +13,37 @@
 int main( void )
 {
     #if ( configUSE_EDF == 1 )
-        /* Uncomment this single line to run the EDF test case. */
         // Simple edf implicit deadlinetest case with 3 tasks added at startup with a fairly low utilization.
-        // test_1_run(); 
+        // edf_1_run(); 
 
         // Higher utilization (but still < 1.0) edf implicit deadline test with 4 tasks added at startup.
-        // test_2_run(); 
+        // edf_2_run(); 
 
         // EDF admission control test, attempts to add unschedulable task at startup and after 10s, then adds a schedulable task.
-        // test_3_run(); 
+        // edf_3_run(); 
 
         // Constrained deadline EDF test with 3 tasks (D != T).
-        // test_4_run();
+        // edf_4_run();
 
         // Higher utilization Constrained deadline EDF test with 4 tasks (D < T).
-        //  test_5_run(); 
+        //  edf_5_run(); 
 
         // Constrained deadline admission control test (expected reject then accept).
-        // test_6_run();
+        // edf_6_run();
 
         // Implicit deadline admission control test (utilization path: expected reject then accept).
-        test_7_run();
+        // edf_7_run();
+    
+    #elif ( configUSE_SRP == 1 ) // configUSE_EDF == 1
+        // srp_1_run();
+        // srp_2_run();
+        // srp_3_run();
+        // srp_4_run();
+        // srp_5_run();
+        // srp_6_run();
     #endif
+
+    
 
     for( ;; )
     {

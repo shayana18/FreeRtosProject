@@ -1,4 +1,4 @@
-#include "edf_tests/test_utils.h"
+#include "test_utils.h"
 
 #if ( configUSE_EDF == 1 )
 

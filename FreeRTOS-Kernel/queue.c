@@ -1874,6 +1874,69 @@ BaseType_t xQueueSemaphoreTake( QueueHandle_t xQueue,
 }
 /*-----------------------------------------------------------*/
 
+#if ( configUSE_SRP == 1 )
+
+BaseType_t xQueueSemaphoreTakeSRP( QueueHandle_t xQueue,
+                                   TickType_t xTicksToWait,
+                                   UBaseType_t uxResourceType,
+                                   UBaseType_t uxCount )
+{
+    BaseType_t xReturn = errQUEUE_EMPTY;
+
+    /* SRP wrappers are non-blocking to keep SRP bookkeeping and lock acquisition
+     * in one deterministic operation. */
+    if( xTicksToWait != ( TickType_t ) 0U )
+    {
+        return errQUEUE_EMPTY;
+    }
+
+    vTaskSuspendAll();
+    {
+        if( xTaskSRPAcquireResource( uxResourceType, uxCount ) == pdPASS )
+        {
+            if( xQueueSemaphoreTake( xQueue, ( TickType_t ) 0U ) == pdPASS )
+            {
+                xReturn = pdPASS;
+            }
+            else
+            {
+                ( void ) xTaskSRPReleaseResource( uxResourceType, uxCount );
+            }
+        }
+    }
+    ( void ) xTaskResumeAll();
+
+    return xReturn;
+}
+
+/*-----------------------------------------------------------*/
+
+BaseType_t xQueueSemaphoreGiveSRP( QueueHandle_t xQueue,
+                                   UBaseType_t uxResourceType,
+                                   UBaseType_t uxCount )
+{
+    BaseType_t xReturn;
+
+    vTaskSuspendAll();
+    {
+        xReturn = xQueueGenericSend( xQueue,
+                                     NULL,
+                                     ( TickType_t ) 0U,
+                                     queueSEND_TO_BACK );
+
+        if( xReturn == pdPASS )
+        {
+            xReturn = xTaskSRPReleaseResource( uxResourceType, uxCount );
+        }
+    }
+    ( void ) xTaskResumeAll();
+
+    return xReturn;
+}
+
+#endif /* configUSE_SRP */
+/*-----------------------------------------------------------*/
+
 BaseType_t xQueuePeek( QueueHandle_t xQueue,
                        void * const pvBuffer,
                        TickType_t xTicksToWait )

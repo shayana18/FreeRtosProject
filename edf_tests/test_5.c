@@ -12,7 +12,7 @@
 
 #include "task_trace.h"
 
-#include "edf_tests/test_utils.h"
+#include "test_utils.h"
 
 /* Constrianed deadlines (D != T) with higher utilization.
  *
@@ -89,7 +89,7 @@ static void Task4(void *pvParameters)
     }
 }
 
-void test_5_run(void)
+void edf_5_run(void)
 {
     stdio_init_all();
     vTraceTaskPinsInit();

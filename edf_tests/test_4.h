@@ -10,7 +10,7 @@
  *
  * Intended usage: call once from main(). This function does not return.
  */
-void test_4_run(void);
+void edf_4_run(void);
 #else
-static inline void test_4_run(void) {}
+static inline void edf_4_run(void) {}
 #endif
