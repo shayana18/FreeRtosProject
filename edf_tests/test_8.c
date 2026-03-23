@@ -74,7 +74,9 @@ static Test8TaskConfig_t xAlwaysMeetTaskConfigs[] =
 
 static Test8PeriodicMissTaskConfig_t xPeriodicMissTaskConfigs[] =
 {
-    /* Periodic-miss tasks: every N jobs they delay past deadline once each period. */
+    /* Periodic-miss tasks: every N jobs they overrun the WCET budget once to trigger
+     * EDF enforcement.  ulMissOverrunMs is added on top of the task's WCET so that
+     * the spin call always exceeds the budget (spin_ms is preempted by the kernel). */
     { { "Test8 T6", 6u, T6_PERIOD_MS, T6_WCET_MS, T6_DEADLINE_MS, 120u, 4u }, 4u, 200u },
     { { "Test8 T7", 7u, T7_PERIOD_MS, T7_WCET_MS, T7_DEADLINE_MS, 140u, 4u }, 3u, 200u }
 };
@@ -118,8 +120,11 @@ static void vTest8PeriodicMissTask( void * pvParameters )
         if( ( pxCfg->uxMissEveryNJobs > 0u ) &&
             ( ( uxJobCount % pxCfg->uxMissEveryNJobs ) == 0u ) )
         {
-            /* Intentionally miss this job's deadline by delaying past relative deadline. */
-            vTaskDelay( pdMS_TO_TICKS( pxCfg->xBase.ulDeadlineMs + pxCfg->ulMissOverrunMs ) );
+            /* Intentionally overrun the WCET budget by spinning for longer than the
+             * task's allocated execution budget.  spin_ms measures CPU execution time
+             * and the EDF tick handler will preempt this task once xJobExecTicks
+             * reaches xWcetTicks, correctly triggering the budget-enforcement path. */
+            spin_ms( pxCfg->xBase.ulWcetMs + pxCfg->ulMissOverrunMs );
         }
     }
 }
