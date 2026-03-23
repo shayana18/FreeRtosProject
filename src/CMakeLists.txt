@@ -3,6 +3,7 @@ message("Adding SRC sub directory")
 
 add_executable(${PROJECT_NAME}
     main.c
+    edf.c
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE 
