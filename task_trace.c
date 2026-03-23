@@ -2,7 +2,13 @@
 
 #include <stdint.h>
 
+#include "FreeRTOS.h"
+
 #include "hardware/gpio.h"
+
+#define TRACE_DEADLINE_MISS_HOLD_TICKS    ( ( configTICK_RATE_HZ > 0u ) ? configTICK_RATE_HZ : 1u )
+
+static volatile uint32_t ulDeadlineMissHoldTicks = 0u;
 
 void vTraceTaskPinsInit( void )
 {
@@ -46,7 +52,6 @@ void vTraceWriteTaskCode( uint32_t ulTaskCode )
     gpio_put( TRACE_TASK_PIN4, ( ulTaskCode & 0x10u ) != 0u );
     gpio_put( TRACE_TASK_PIN5, ( ulTaskCode & 0x20u ) != 0u );
     gpio_put( TRACE_TASK_PIN6, ( ulTaskCode & 0x40u ) != 0u );
-    gpio_put( TRACE_DEADLINE_MISS_PIN, 0 );
 }
 
 void vTraceTaskSwitchedIn( uint32_t ulTaskCode )
@@ -67,10 +72,25 @@ void vTraceClearTaskSwitchSignal( void )
 
 void vTraceSignalDeadlineMiss( void )
 {
+    ulDeadlineMissHoldTicks = TRACE_DEADLINE_MISS_HOLD_TICKS;
     gpio_put( TRACE_DEADLINE_MISS_PIN, 1 );
 }
 
 void vTraceClearDeadlineMissSignal( void )
 {
+    ulDeadlineMissHoldTicks = 0u;
     gpio_put( TRACE_DEADLINE_MISS_PIN, 0 );
+}
+
+void vTraceDeadlineMissTick( void )
+{
+    if( ulDeadlineMissHoldTicks > 0u )
+    {
+        ulDeadlineMissHoldTicks--;
+
+        if( ulDeadlineMissHoldTicks == 0u )
+        {
+            gpio_put( TRACE_DEADLINE_MISS_PIN, 0 );
+        }
+    }
 }

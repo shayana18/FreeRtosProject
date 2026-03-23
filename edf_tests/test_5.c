@@ -43,41 +43,85 @@
 
 static void Task1(void *pvParameters)
 {
+    TickType_t xLastWakeTime;
+    BaseType_t xDelayResult;
+
     (void) pvParameters;
+    xLastWakeTime = xTaskGetTickCount();
 
     for (;;)
     {
         spin_ms(T1_WCET_MS);
+
+        xDelayResult = xTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(T1_PERIOD_MS));
+
+        if( xDelayResult == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
     }
 }
 
 static void Task2(void *pvParameters)
 {
+    TickType_t xLastWakeTime;
+    BaseType_t xDelayResult;
+
     (void) pvParameters;
+    xLastWakeTime = xTaskGetTickCount();
 
     for (;;)
     {
         spin_ms(T2_WCET_MS);
+
+        xDelayResult = xTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(T2_PERIOD_MS));
+
+        if( xDelayResult == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
     }
 }
 
 static void Task3(void *pvParameters)
 {
+    TickType_t xLastWakeTime;
+    BaseType_t xDelayResult;
+
     (void) pvParameters;
+    xLastWakeTime = xTaskGetTickCount();
 
     for (;;)
     {
         spin_ms(T3_WCET_MS);
+
+        xDelayResult = xTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(T3_PERIOD_MS));
+
+        if( xDelayResult == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
     }
 }
 
 static void Task4(void *pvParameters)
 {
+    TickType_t xLastWakeTime;
+    BaseType_t xDelayResult;
+
     (void) pvParameters;
+    xLastWakeTime = xTaskGetTickCount();
 
     for (;;)
     {
         spin_ms(T4_WCET_MS);
+
+        xDelayResult = xTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(T4_PERIOD_MS));
+
+        if( xDelayResult == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
     }
 }
 

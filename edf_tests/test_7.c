@@ -56,41 +56,85 @@ static volatile BaseType_t xGoodCreateResult = pdFAIL;
 
 static void BaselineTask1( void * pvParameters )
 {
+    TickType_t xLastWakeTime;
+    BaseType_t xDelayResult;
+
     ( void ) pvParameters;
+    xLastWakeTime = xTaskGetTickCount();
 
     for( ;; )
     {
         spin_ms( B1_WCET_MS );
+
+        xDelayResult = xTaskDelayUntil( &xLastWakeTime, pdMS_TO_TICKS( B1_PERIOD_MS ) );
+
+        if( xDelayResult == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
     }
 }
 
 static void BaselineTask2( void * pvParameters )
 {
+    TickType_t xLastWakeTime;
+    BaseType_t xDelayResult;
+
     ( void ) pvParameters;
+    xLastWakeTime = xTaskGetTickCount();
 
     for( ;; )
     {
         spin_ms( B2_WCET_MS );
+
+        xDelayResult = xTaskDelayUntil( &xLastWakeTime, pdMS_TO_TICKS( B2_PERIOD_MS ) );
+
+        if( xDelayResult == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
     }
 }
 
 static void BadTask( void * pvParameters )
 {
+    TickType_t xLastWakeTime;
+    BaseType_t xDelayResult;
+
     ( void ) pvParameters;
+    xLastWakeTime = xTaskGetTickCount();
 
     for( ;; )
     {
         spin_ms( BAD_WCET_MS );
+
+        xDelayResult = xTaskDelayUntil( &xLastWakeTime, pdMS_TO_TICKS( BAD_PERIOD_MS ) );
+
+        if( xDelayResult == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
     }
 }
 
 static void GoodTask( void * pvParameters )
 {
+    TickType_t xLastWakeTime;
+    BaseType_t xDelayResult;
+
     ( void ) pvParameters;
+    xLastWakeTime = xTaskGetTickCount();
 
     for( ;; )
     {
         spin_ms( GOOD_WCET_MS );
+
+        xDelayResult = xTaskDelayUntil( &xLastWakeTime, pdMS_TO_TICKS( GOOD_PERIOD_MS ) );
+
+        if( xDelayResult == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
     }
 }
 

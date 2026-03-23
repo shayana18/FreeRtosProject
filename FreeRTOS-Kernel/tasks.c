@@ -621,6 +621,15 @@ PRIVILEGED_DATA static volatile configRUN_TIME_COUNTER_TYPE ulTotalRunTime[ conf
     static TCB_t * prvSRPSelectReadyTask( void ) PRIVILEGED_FUNCTION;
 #endif
 
+#if ( ( configUSE_EDF == 1 ) || ( configUSE_SRP == 1 ) )
+    static TickType_t prvPeriodicTaskNextReleaseAfter( const TCB_t * pxTCB,
+                                                       TickType_t xNow ) PRIVILEGED_FUNCTION;
+    static void prvPeriodicTaskAdvanceAndReinsert( TCB_t * pxTCB,
+                                                   ListItem_t * pxTaskListItem,
+                                                   List_t * pxRegistryList,
+                                                   TickType_t xNextReleaseTime ) PRIVILEGED_FUNCTION;
+#endif
+
 /*
  * Creates the idle tasks during scheduler start.
  */
@@ -3437,15 +3446,10 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
                 /* Only tasks registered as EDF periodic tasks update EDF release/deadline metadata. */
                 if( listLIST_ITEM_CONTAINER( &( pxCurrentTCB->xEDFTaskListItem ) ) == &xEDFTaskRegistryList )
                 {
-                    pxCurrentTCB->xAbsJobReleaseTime = xTimeToWake;
-                    pxCurrentTCB->xAbsDeadline = xTimeToWake + pxCurrentTCB->xRelDeadline;
-                    pxCurrentTCB->xJobExecTicks = ( TickType_t ) 0U;
-
-                    ( void ) uxListRemove( &( pxCurrentTCB->xEDFTaskListItem ) );
-                    listSET_LIST_ITEM_VALUE( &( pxCurrentTCB->xEDFTaskListItem ),
-                                             pxCurrentTCB->xAbsJobReleaseTime );
-                    vListInsert( &xEDFTaskRegistryList,
-                                 &( pxCurrentTCB->xEDFTaskListItem ) );
+                    prvPeriodicTaskAdvanceAndReinsert( pxCurrentTCB,
+                                                       &( pxCurrentTCB->xEDFTaskListItem ),
+                                                       &xEDFTaskRegistryList,
+                                                       xTimeToWake );
                 }
             }
             #endif
@@ -5757,7 +5761,7 @@ BaseType_t xTaskIncrementTick( void )
 
         #if ( configUSE_EDF == 1 )
         {
-            /* Single-core EDF budget enforcement is based on the task that was
+            /* Single-core EDF deadline enforcement is based on the task that was
              * executing when the tick interrupt fired. */
             if( listLIST_ITEM_CONTAINER( &( pxCurrentTCB->xEDFTaskListItem ) ) == &xEDFTaskRegistryList )
             {
@@ -5770,29 +5774,16 @@ BaseType_t xTaskIncrementTick( void )
                     traceTASK_DEADLINE_MISSED();
                     xStopCurrentJob = pdTRUE;
                 }
-                else if( pxCurrentTCB->xJobExecTicks >= pxCurrentTCB->xWcetTicks )
-                {
-                    xStopCurrentJob = pdTRUE;
-                }
 
                 if( xStopCurrentJob != pdFALSE )
                 {
-                    TickType_t xNextReleaseTime = pxCurrentTCB->xAbsJobReleaseTime + pxCurrentTCB->xPeriodTicks;
+                    const TickType_t xNextReleaseTime = prvPeriodicTaskNextReleaseAfter( pxCurrentTCB,
+                                                                                           xConstTickCount );
 
-                    while( xNextReleaseTime <= xConstTickCount )
-                    {
-                        xNextReleaseTime += pxCurrentTCB->xPeriodTicks;
-                    }
-
-                    pxCurrentTCB->xAbsJobReleaseTime = xNextReleaseTime;
-                    pxCurrentTCB->xAbsDeadline = xNextReleaseTime + pxCurrentTCB->xRelDeadline;
-                    pxCurrentTCB->xJobExecTicks = ( TickType_t ) 0U;
-
-                    ( void ) uxListRemove( &( pxCurrentTCB->xEDFTaskListItem ) );
-                    listSET_LIST_ITEM_VALUE( &( pxCurrentTCB->xEDFTaskListItem ),
-                                             pxCurrentTCB->xAbsJobReleaseTime );
-                    vListInsert( &xEDFTaskRegistryList,
-                                 &( pxCurrentTCB->xEDFTaskListItem ) );
+                    prvPeriodicTaskAdvanceAndReinsert( pxCurrentTCB,
+                                                       &( pxCurrentTCB->xEDFTaskListItem ),
+                                                       &xEDFTaskRegistryList,
+                                                       xNextReleaseTime );
 
                     prvAddCurrentTaskToDelayedList( xNextReleaseTime - xConstTickCount, pdFALSE );
                     xSwitchRequired = pdTRUE;
@@ -5820,16 +5811,13 @@ BaseType_t xTaskIncrementTick( void )
 
                 if( xStopCurrentJob != pdFALSE )
                 {
-                    TickType_t xNextReleaseTime = pxCurrentTCB->xAbsJobReleaseTime + pxCurrentTCB->xPeriodTicks;
+                    const TickType_t xNextReleaseTime = prvPeriodicTaskNextReleaseAfter( pxCurrentTCB,
+                                                                                           xConstTickCount );
 
-                    while( xNextReleaseTime <= xConstTickCount )
-                    {
-                        xNextReleaseTime += pxCurrentTCB->xPeriodTicks;
-                    }
-
-                    pxCurrentTCB->xAbsJobReleaseTime = xNextReleaseTime;
-                    pxCurrentTCB->xAbsDeadline = xNextReleaseTime + pxCurrentTCB->xRelDeadline;
-                    pxCurrentTCB->xJobExecTicks = ( TickType_t ) 0U;
+                    prvPeriodicTaskAdvanceAndReinsert( pxCurrentTCB,
+                                                       &( pxCurrentTCB->xSRPTaskListItem ),
+                                                       &xSRPTaskRegistryList,
+                                                       xNextReleaseTime );
 
                     /* Match EDF-style job skipping, but ensure SRP bookkeeping is
                      * unwound so a dropped job cannot keep resources accounted as held. */
@@ -5858,12 +5846,6 @@ BaseType_t xTaskIncrementTick( void )
                         }
                     }
                     #endif
-
-                    ( void ) uxListRemove( &( pxCurrentTCB->xSRPTaskListItem ) );
-                    listSET_LIST_ITEM_VALUE( &( pxCurrentTCB->xSRPTaskListItem ),
-                                             pxCurrentTCB->xAbsJobReleaseTime );
-                    vListInsert( &xSRPTaskRegistryList,
-                                 &( pxCurrentTCB->xSRPTaskListItem ) );
 
                     prvAddCurrentTaskToDelayedList( xNextReleaseTime - xConstTickCount, pdFALSE );
                     xSwitchRequired = pdTRUE;
@@ -7693,6 +7675,37 @@ static void prvResetNextTaskUnblockTime( void )
         xNextTaskUnblockTime = listGET_ITEM_VALUE_OF_HEAD_ENTRY( pxDelayedTaskList );
     }
 }
+
+#if ( ( configUSE_EDF == 1 ) || ( configUSE_SRP == 1 ) )
+
+    static TickType_t prvPeriodicTaskNextReleaseAfter( const TCB_t * pxTCB,
+                                                       TickType_t xNow )
+    {
+        TickType_t xNextReleaseTime = pxTCB->xAbsJobReleaseTime + pxTCB->xPeriodTicks;
+
+        while( xNextReleaseTime <= xNow )
+        {
+            xNextReleaseTime += pxTCB->xPeriodTicks;
+        }
+
+        return xNextReleaseTime;
+    }
+
+    static void prvPeriodicTaskAdvanceAndReinsert( TCB_t * pxTCB,
+                                                   ListItem_t * pxTaskListItem,
+                                                   List_t * pxRegistryList,
+                                                   TickType_t xNextReleaseTime )
+    {
+        pxTCB->xAbsJobReleaseTime = xNextReleaseTime;
+        pxTCB->xAbsDeadline = xNextReleaseTime + pxTCB->xRelDeadline;
+        pxTCB->xJobExecTicks = ( TickType_t ) 0U;
+
+        ( void ) uxListRemove( pxTaskListItem );
+        listSET_LIST_ITEM_VALUE( pxTaskListItem, pxTCB->xAbsJobReleaseTime );
+        vListInsert( pxRegistryList, pxTaskListItem );
+    }
+
+#endif /* ( configUSE_EDF == 1 ) || ( configUSE_SRP == 1 ) */
 /*-----------------------------------------------------------*/
 
 #if ( ( INCLUDE_xTaskGetCurrentTaskHandle == 1 ) || ( configUSE_MUTEXES == 1 ) ) || ( configNUMBER_OF_CORES > 1 )

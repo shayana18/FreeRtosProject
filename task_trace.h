@@ -14,9 +14,9 @@ extern "C" {
 #define TRACE_TASK_PIN3    5u
 #define TRACE_TASK_PIN4    6u
 #define TRACE_TASK_PIN5    7u
-#define TRACE_TASK_PIN6    15u
+#define TRACE_TASK_PIN6    8u
 #define TRACE_TASK_SWITCH_PIN    9u
-#define TRACE_DEADLINE_MISS_PIN    8u
+#define TRACE_DEADLINE_MISS_PIN    15u
 
 void vTraceTaskPinsInit( void );
 void vTraceWriteTaskCode( uint32_t ulTaskCode );
@@ -25,11 +25,13 @@ void vTraceSetTaskSwitchSignal( void );
 void vTraceClearTaskSwitchSignal( void );
 void vTraceSignalDeadlineMiss( void );
 void vTraceClearDeadlineMissSignal( void );
+void vTraceDeadlineMissTick( void );
 
 #define traceTASK_SWITCHED_IN()    vTraceTaskSwitchedIn( ( uint32_t ) ( uintptr_t ) pxCurrentTCB->pxTaskTag )
 
 #define traceTASK_SWITCHED_OUT()    vTraceClearTaskSwitchSignal()
 #define traceTASK_DEADLINE_MISSED()    vTraceSignalDeadlineMiss()
+#define traceTASK_INCREMENT_TICK( xTickCount )    vTraceDeadlineMissTick()
 
 #ifdef __cplusplus
 }

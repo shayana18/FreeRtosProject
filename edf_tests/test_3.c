@@ -40,56 +40,106 @@ static volatile BaseType_t xGoodCreateResultAfter10s = pdFAIL;
 
 static void BaselineTask1(void *pvParameters)
 {
-    (void) pvParameters;
+    TickType_t xLastWakeTime;
+    BaseType_t xDelayResult;
 
+    (void) pvParameters;
+    xLastWakeTime = xTaskGetTickCount();
 
     for (;;)
     {
         spin_ms(B1_WCET_MS);
+
+        xDelayResult = xTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(B1_PERIOD_MS));
+
+        if( xDelayResult == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
     }
 }
 
 static void BaselineTask2(void *pvParameters)
 {
-    (void) pvParameters;
+    TickType_t xLastWakeTime;
+    BaseType_t xDelayResult;
 
+    (void) pvParameters;
+    xLastWakeTime = xTaskGetTickCount();
 
     for (;;)
     {
         spin_ms(B2_WCET_MS);
+
+        xDelayResult = xTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(B2_PERIOD_MS));
+
+        if( xDelayResult == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
     }
 }
 
 static void BaselineTask3(void *pvParameters)
 {
-    (void) pvParameters;
+    TickType_t xLastWakeTime;
+    BaseType_t xDelayResult;
 
+    (void) pvParameters;
+    xLastWakeTime = xTaskGetTickCount();
 
     for (;;)
     {
         spin_ms(B3_WCET_MS);
+
+        xDelayResult = xTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(B3_PERIOD_MS));
+
+        if( xDelayResult == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
     }
 }
 
 static void BadTask(void *pvParameters)
 {
-    (void) pvParameters;
+    TickType_t xLastWakeTime;
+    BaseType_t xDelayResult;
 
+    (void) pvParameters;
+    xLastWakeTime = xTaskGetTickCount();
 
     for (;;)
     {
         spin_ms(BAD_WCET_MS);
+
+        xDelayResult = xTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(BAD_PERIOD_MS));
+
+        if( xDelayResult == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
     }
 }
 
 static void GoodTask(void *pvParameters)
 {
-    (void) pvParameters;
+    TickType_t xLastWakeTime;
+    BaseType_t xDelayResult;
 
+    (void) pvParameters;
+    xLastWakeTime = xTaskGetTickCount();
 
     for (;;)
     {
         spin_ms(GOOD_WCET_MS);
+
+        xDelayResult = xTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(GOOD_PERIOD_MS));
+
+        if( xDelayResult == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
     }
 }
 

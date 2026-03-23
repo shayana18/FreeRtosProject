@@ -82,8 +82,12 @@ static Test8PeriodicMissTaskConfig_t xPeriodicMissTaskConfigs[] =
 static void vTest8AlwaysMeetTask( void * pvParameters )
 {
     const Test8TaskConfig_t * pxCfg = ( const Test8TaskConfig_t * ) pvParameters;
+    TickType_t xLastWakeTime;
+    const TickType_t xPeriodTicks = pdMS_TO_TICKS( pxCfg->ulPeriodMs );
 
     configASSERT( pxCfg != NULL );
+
+    xLastWakeTime = xTaskGetTickCount();
 
     for( ;; )
     {
@@ -94,6 +98,9 @@ static void vTest8AlwaysMeetTask( void * pvParameters )
         {
             spin_ms( pxCfg->ulLoopSliceMs );
         }
+
+        /* Normal EDF job completion path: explicitly release at next period. */
+        ( void ) xTaskDelayUntil( &xLastWakeTime, xPeriodTicks );
     }
 }
 
@@ -101,25 +108,47 @@ static void vTest8PeriodicMissTask( void * pvParameters )
 {
     const Test8PeriodicMissTaskConfig_t * pxCfg = ( const Test8PeriodicMissTaskConfig_t * ) pvParameters;
     UBaseType_t uxJobCount = 0u;
+    TickType_t xLastWakeTime;
+    const TickType_t xPeriodTicks = pdMS_TO_TICKS( pxCfg->xBase.ulPeriodMs );
 
     configASSERT( pxCfg != NULL );
+
+    xLastWakeTime = xTaskGetTickCount();
 
     for( ;; )
     {
         UBaseType_t uxLoop;
-
-        for( uxLoop = 0u; uxLoop < pxCfg->xBase.uxLoopCount; uxLoop++ )
-        {
-            spin_ms( pxCfg->xBase.ulLoopSliceMs );
-        }
+        BaseType_t xMissThisJob = pdFALSE;
+        BaseType_t xDelayResult;
 
         uxJobCount++;
 
         if( ( pxCfg->uxMissEveryNJobs > 0u ) &&
             ( ( uxJobCount % pxCfg->uxMissEveryNJobs ) == 0u ) )
         {
-            /* Intentionally miss this job's deadline by delaying past relative deadline. */
-            vTaskDelay( pdMS_TO_TICKS( pxCfg->xBase.ulDeadlineMs + pxCfg->ulMissOverrunMs ) );
+            xMissThisJob = pdTRUE;
+        }
+
+        for( uxLoop = 0u; uxLoop < pxCfg->xBase.uxLoopCount; uxLoop++ )
+        {
+            spin_ms( pxCfg->xBase.ulLoopSliceMs );
+        }
+
+        if( xMissThisJob != pdFALSE )
+        {
+            /* Intentionally overrun while running so the kernel tick-time
+             * deadline logic catches a real execution overrun. */
+            spin_ms( pxCfg->xBase.ulDeadlineMs + pxCfg->ulMissOverrunMs );
+        }
+
+        /* Always use an explicit periodic boundary from task code. */
+        xDelayResult = xTaskDelayUntil( &xLastWakeTime, xPeriodTicks );
+
+        if( xDelayResult == pdFALSE )
+        {
+            /* If we're already late, restart the local phase anchor instead of
+             * repeatedly trying to catch up old release points. */
+            xLastWakeTime = xTaskGetTickCount();
         }
     }
 }
