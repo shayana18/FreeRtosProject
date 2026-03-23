@@ -616,6 +616,8 @@ PRIVILEGED_DATA static volatile configRUN_TIME_COUNTER_TYPE ulTotalRunTime[ conf
                                             TickType_t xWCET,
                                             TickType_t xRelD ) PRIVILEGED_FUNCTION;
     static void prvSRPRecomputeSystemCeiling( void ) PRIVILEGED_FUNCTION;
+    static void prvSRPForceReleaseResourcesForTask( TCB_t * pxTCB,
+                                                    UBaseType_t * puxReleasedCounts ) PRIVILEGED_FUNCTION;
     static TCB_t * prvSRPSelectReadyTask( void ) PRIVILEGED_FUNCTION;
 #endif
 
@@ -2074,6 +2076,50 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
 
 /*-----------------------------------------------------------*/
 
+    static void prvSRPForceReleaseResourcesForTask( TCB_t * pxTCB,
+                                                    UBaseType_t * puxReleasedCounts )
+    {
+        #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
+            UBaseType_t uxResourceType;
+
+            configASSERT( pxTCB != NULL );
+
+            for( uxResourceType = 0U;
+                 uxResourceType < ( UBaseType_t ) configSRP_RESOURCE_TYPE_COUNT;
+                 uxResourceType++ )
+            {
+                const UBaseType_t uxTaskHeld = pxTCB->uxSRPResourceHeldCount[ uxResourceType ];
+
+                if( uxTaskHeld > 0U )
+                {
+                    const UBaseType_t uxActive = uxSRPResourceActiveCount[ uxResourceType ];
+
+                    if( puxReleasedCounts != NULL )
+                    {
+                        puxReleasedCounts[ uxResourceType ] = uxTaskHeld;
+                    }
+
+                    if( uxActive >= uxTaskHeld )
+                    {
+                        uxSRPResourceActiveCount[ uxResourceType ] = uxActive - uxTaskHeld;
+                    }
+                    else
+                    {
+                        /* Keep state consistent even if previous accounting was already off. */
+                        uxSRPResourceActiveCount[ uxResourceType ] = 0U;
+                    }
+
+                    pxTCB->uxSRPResourceHeldCount[ uxResourceType ] = 0U;
+                }
+            }
+        #else
+            ( void ) pxTCB;
+            ( void ) puxReleasedCounts;
+        #endif
+    }
+
+/*-----------------------------------------------------------*/
+
     static TCB_t * prvSRPSelectReadyTask( void )
     {
         TCB_t * pxSelectedTCB = NULL;
@@ -2190,6 +2236,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                                         UBaseType_t uxCount )
     {
         BaseType_t xReturn = pdFAIL;
+        TCB_t * pxReleasedFromTCB = NULL;
 
         if( ( uxCount == 0U ) ||
             ( uxResourceType >= ( UBaseType_t ) configSRP_RESOURCE_TYPE_COUNT ) )
@@ -2211,6 +2258,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                     {
                         uxSRPResourceActiveCount[ uxResourceType ] = uxActive - uxCount;
                         pxCurrentTCB->uxSRPResourceHeldCount[ uxResourceType ] = uxTaskHeld - uxCount;
+                        pxReleasedFromTCB = pxCurrentTCB;
                         prvSRPRecomputeSystemCeiling();
                         xReturn = pdPASS;
                     }
@@ -2218,6 +2266,17 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
             #endif
         }
         taskEXIT_CRITICAL();
+
+        #if ( configUSE_SRP_RESOURCE_RELEASE_HOOK == 1 )
+            if( ( xReturn == pdPASS ) &&
+                ( pxReleasedFromTCB != NULL ) )
+            {
+                vApplicationSRPResourceReleaseHook( ( TaskHandle_t ) pxReleasedFromTCB,
+                                                    uxResourceType,
+                                                    uxCount,
+                                                    pdFALSE );
+            }
+        #endif
 
         return xReturn;
     }
@@ -3115,6 +3174,9 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
         TCB_t * pxTCB;
         BaseType_t xDeleteTCBInIdleTask = pdFALSE;
         BaseType_t xTaskIsRunningOrYielding;
+        #if ( configUSE_SRP == 1 ) && ( configSRP_RESOURCE_TYPE_COUNT > 0U )
+            UBaseType_t uxSRPReleasedCounts[ configSRP_RESOURCE_TYPE_COUNT ] = { 0U };
+        #endif
 
         traceENTER_vTaskDelete( xTaskToDelete );
 
@@ -3158,6 +3220,12 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
             #endif
             #if ( configUSE_SRP == 1 )
             {
+                #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
+                    prvSRPForceReleaseResourcesForTask( pxTCB, uxSRPReleasedCounts );
+                #else
+                    prvSRPForceReleaseResourcesForTask( pxTCB, NULL );
+                #endif
+
                 if( listLIST_ITEM_CONTAINER( &( pxTCB->xSRPTaskListItem ) ) != NULL )
                 {
                     ( void ) uxListRemove( &( pxTCB->xSRPTaskListItem ) );
@@ -3202,6 +3270,7 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
                 /* Call the delete hook before portPRE_TASK_DELETE_HOOK() as
                  * portPRE_TASK_DELETE_HOOK() does not return in the Win32 port. */
                 traceTASK_DELETE( pxTCB );
+                traceTASK_SWITCHED_OUT();
 
                 /* Delete the task TCB in idle task. */
                 xDeleteTCBInIdleTask = pdTRUE;
@@ -3252,6 +3321,25 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
             }
         }
         taskEXIT_CRITICAL();
+
+        #if ( configUSE_SRP == 1 ) && ( configSRP_RESOURCE_TYPE_COUNT > 0U ) && ( configUSE_SRP_RESOURCE_RELEASE_HOOK == 1 )
+        {
+            UBaseType_t uxResourceType;
+
+            for( uxResourceType = 0U;
+                 uxResourceType < ( UBaseType_t ) configSRP_RESOURCE_TYPE_COUNT;
+                 uxResourceType++ )
+            {
+                if( uxSRPReleasedCounts[ uxResourceType ] > 0U )
+                {
+                    vApplicationSRPResourceReleaseHook( ( TaskHandle_t ) pxTCB,
+                                                        uxResourceType,
+                                                        uxSRPReleasedCounts[ uxResourceType ],
+                                                        pdTRUE );
+                }
+            }
+        }
+        #endif
 
         /* If the task is not deleting itself, call prvDeleteTCB from outside of
          * critical section. If a task deletes itself, prvDeleteTCB is called
@@ -5679,6 +5767,7 @@ BaseType_t xTaskIncrementTick( void )
 
                 if( xConstTickCount > pxCurrentTCB->xAbsDeadline )
                 {
+                    traceTASK_DEADLINE_MISSED();
                     xStopCurrentJob = pdTRUE;
                 }
                 else if( pxCurrentTCB->xJobExecTicks >= pxCurrentTCB->xWcetTicks )
@@ -5721,6 +5810,7 @@ BaseType_t xTaskIncrementTick( void )
 
                 if( xConstTickCount > pxCurrentTCB->xAbsDeadline )
                 {
+                    traceTASK_DEADLINE_MISSED();
                     xStopCurrentJob = pdTRUE;
                 }
                 else if( pxCurrentTCB->xJobExecTicks >= pxCurrentTCB->xWcetTicks )
@@ -5740,6 +5830,34 @@ BaseType_t xTaskIncrementTick( void )
                     pxCurrentTCB->xAbsJobReleaseTime = xNextReleaseTime;
                     pxCurrentTCB->xAbsDeadline = xNextReleaseTime + pxCurrentTCB->xRelDeadline;
                     pxCurrentTCB->xJobExecTicks = ( TickType_t ) 0U;
+
+                    /* Match EDF-style job skipping, but ensure SRP bookkeeping is
+                     * unwound so a dropped job cannot keep resources accounted as held. */
+                    #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
+                        prvSRPForceReleaseResourcesForTask( pxCurrentTCB, uxSRPReleasedCounts );
+                    #else
+                        prvSRPForceReleaseResourcesForTask( pxCurrentTCB, NULL );
+                    #endif
+                    prvSRPRecomputeSystemCeiling();
+
+                    #if ( configSRP_RESOURCE_TYPE_COUNT > 0U ) && ( configUSE_SRP_RESOURCE_RELEASE_HOOK == 1 )
+                    {
+                        UBaseType_t uxResourceType;
+
+                        for( uxResourceType = 0U;
+                             uxResourceType < ( UBaseType_t ) configSRP_RESOURCE_TYPE_COUNT;
+                             uxResourceType++ )
+                        {
+                            if( uxSRPReleasedCounts[ uxResourceType ] > 0U )
+                            {
+                                vApplicationSRPResourceReleaseHook( ( TaskHandle_t ) pxCurrentTCB,
+                                                                    uxResourceType,
+                                                                    uxSRPReleasedCounts[ uxResourceType ],
+                                                                    pdTRUE );
+                            }
+                        }
+                    }
+                    #endif
 
                     ( void ) uxListRemove( &( pxCurrentTCB->xSRPTaskListItem ) );
                     listSET_LIST_ITEM_VALUE( &( pxCurrentTCB->xSRPTaskListItem ),

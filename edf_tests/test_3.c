@@ -42,7 +42,6 @@ static void BaselineTask1(void *pvParameters)
 {
     (void) pvParameters;
 
-    vTaskSetApplicationTaskTag(NULL, (TaskHookFunction_t) 1);
 
     for (;;)
     {
@@ -54,7 +53,6 @@ static void BaselineTask2(void *pvParameters)
 {
     (void) pvParameters;
 
-    vTaskSetApplicationTaskTag(NULL, (TaskHookFunction_t) 2);
 
     for (;;)
     {
@@ -66,7 +64,6 @@ static void BaselineTask3(void *pvParameters)
 {
     (void) pvParameters;
 
-    vTaskSetApplicationTaskTag(NULL, (TaskHookFunction_t) 4);
 
     for (;;)
     {
@@ -78,7 +75,6 @@ static void BadTask(void *pvParameters)
 {
     (void) pvParameters;
 
-    vTaskSetApplicationTaskTag(NULL, (TaskHookFunction_t) 3);
 
     for (;;)
     {
@@ -90,7 +86,6 @@ static void GoodTask(void *pvParameters)
 {
     (void) pvParameters;
 
-    vTaskSetApplicationTaskTag(NULL, (TaskHookFunction_t) 8);
 
     for (;;)
     {
@@ -102,7 +97,6 @@ static void AdmissionControllerTask(void *pvParameters)
 {
     (void) pvParameters;
 
-    vTaskSetApplicationTaskTag(NULL, (TaskHookFunction_t) 0);
 
     vTaskDelay(pdMS_TO_TICKS(10000u));
 
@@ -157,7 +151,7 @@ void edf_3_run(void)
     {
         TaskHandle_t xController = NULL;
         (void) xTaskCreate(AdmissionControllerTask, "Admit Ctrl", 256, NULL, &xController, 20000u, 10u, 20000u);
-        vTaskSetApplicationTaskTag(xController, (TaskHookFunction_t) 0);
+        vTaskSetApplicationTaskTag(xController, (TaskHookFunction_t) 64);
     }
 
     vTaskStartScheduler();

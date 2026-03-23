@@ -40,8 +40,6 @@ static void Task1(void *pvParameters)
 {
     (void) pvParameters;
 
-    vTaskSetApplicationTaskTag(NULL, (TaskHookFunction_t) 1);
-
     for (;;)
     {
         spin_ms(T1_WCET_MS);
@@ -52,8 +50,6 @@ static void Task2(void *pvParameters)
 {
     (void) pvParameters;
 
-    vTaskSetApplicationTaskTag(NULL, (TaskHookFunction_t) 2);
-
     for (;;)
     {
         spin_ms(T2_WCET_MS);
@@ -63,8 +59,6 @@ static void Task2(void *pvParameters)
 static void Task3(void *pvParameters)
 {
     (void) pvParameters;
-
-    vTaskSetApplicationTaskTag(NULL, (TaskHookFunction_t) 4);
 
     for (;;)
     {

@@ -1,7 +1,7 @@
 
 // Configure what scheduling algorithm is to be used. If all 0 then use default FreeRTOS scheduling
-#define configUSE_EDF 0
-#define configUSE_SRP 1
+#define configUSE_EDF 1
+#define configUSE_SRP 0
 #define configUSE_CBS 0
 
 /* SRP global resource table configuration.
@@ -20,5 +20,11 @@
  * A value of 0 means the resource does not raise system ceiling. */
 #ifndef configSRP_RESOURCE_CEILING_TABLE
 	#define configSRP_RESOURCE_CEILING_TABLE { 0U }
+#endif
+
+/* Optional application hook called after SRP resources are released.
+ * Set to 1 to provide vApplicationSRPResourceReleaseHook() in application code. */
+#ifndef configUSE_SRP_RESOURCE_RELEASE_HOOK
+	#define configUSE_SRP_RESOURCE_RELEASE_HOOK 0
 #endif
 

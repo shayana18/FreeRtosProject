@@ -56,8 +56,6 @@ static void BaselineTask1(void *pvParameters)
 {
     (void) pvParameters;
 
-    vTaskSetApplicationTaskTag(NULL, (TaskHookFunction_t) 1);
-
     for (;;)
     {
         spin_ms(B1_WCET_MS);
@@ -67,8 +65,6 @@ static void BaselineTask1(void *pvParameters)
 static void BaselineTask2(void *pvParameters)
 {
     (void) pvParameters;
-
-    vTaskSetApplicationTaskTag(NULL, (TaskHookFunction_t) 2);
 
     for (;;)
     {
@@ -80,8 +76,6 @@ static void BadTask(void *pvParameters)
 {
     (void) pvParameters;
 
-    vTaskSetApplicationTaskTag(NULL, (TaskHookFunction_t) 8);
-
     for (;;)
     {
         spin_ms(BAD_WCET_MS);
@@ -91,8 +85,6 @@ static void BadTask(void *pvParameters)
 static void GoodTask(void *pvParameters)
 {
     (void) pvParameters;
-
-    vTaskSetApplicationTaskTag(NULL, (TaskHookFunction_t) 4);
 
     for (;;)
     {

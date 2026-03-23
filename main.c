@@ -8,6 +8,7 @@
     #include "edf_tests/test_5.h"
     #include "edf_tests/test_6.h"
     #include "edf_tests/test_7.h"
+    #include "edf_tests/test_8.h"
 #endif
 
 int main( void )
@@ -33,6 +34,9 @@ int main( void )
 
         // Implicit deadline admission control test (utilization path: expected reject then accept).
         // edf_7_run();
+
+        // Seven tasks with binary-encoded trace IDs and two intentional single deadline-miss events.
+        edf_8_run();
     
     #elif ( configUSE_SRP == 1 ) // configUSE_EDF == 1
         // srp_1_run();

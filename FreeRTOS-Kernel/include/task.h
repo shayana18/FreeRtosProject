@@ -194,6 +194,16 @@ typedef enum
         UBaseType_t uxResourceType;
         UBaseType_t uxMaxCount;
     } SRPResourceClaim_t;
+
+    #if ( configUSE_SRP_RESOURCE_RELEASE_HOOK == 1 )
+        /* Optional application callback invoked after SRP units are released.
+         * xForcedRelease is pdTRUE for task-delete cleanup, pdFALSE for explicit release.
+         * The callback must be bounded and must not block. */
+        void vApplicationSRPResourceReleaseHook( TaskHandle_t xTask,
+                                                 UBaseType_t uxResourceType,
+                                                 UBaseType_t uxCount,
+                                                 BaseType_t xForcedRelease );
+    #endif
 #endif
 
 /**
