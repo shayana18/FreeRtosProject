@@ -1,6 +1,6 @@
 #include "test_utils.h"
 
-#if ( configUSE_EDF == 1 )
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 0 ) )
 
 #include "pico/stdlib.h"
 

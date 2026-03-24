@@ -13,7 +13,9 @@
 
 int main( void )
 {
-    #if ( configUSE_EDF == 1 )
+    
+    #if ( configUSE_EDF == 1)
+        #if (configUSE_SRP == 0)
         // Simple edf implicit deadlinetest case with 3 tasks added at startup with a fairly low utilization.
         // edf_1_run(); 
 
@@ -36,18 +38,16 @@ int main( void )
         // edf_7_run();
 
         // Seven tasks with binary-encoded trace IDs and two intentional single deadline-miss events.
-        edf_8_run();
-    
-    #elif ( configUSE_SRP == 1 ) // configUSE_EDF == 1
-        // srp_1_run();
-        // srp_2_run();
-        // srp_3_run();
-        // srp_4_run();
-        // srp_5_run();
-        // srp_6_run();
+        // edf_8_run();
+        #else
+            // srp_1_run();
+            // srp_2_run();
+            // srp_3_run();
+            // srp_4_run();
+            // srp_5_run();
+            // srp_6_run();
+        #endif 
     #endif
-
-    
 
     for( ;; )
     {

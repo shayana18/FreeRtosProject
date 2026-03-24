@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#if ( configUSE_EDF == 1 )
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 0 ) )
 void spin_ms(uint32_t target_ms);
 #else
 static inline void spin_ms(uint32_t target_ms)

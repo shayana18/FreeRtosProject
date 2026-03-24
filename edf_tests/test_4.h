@@ -2,7 +2,7 @@
 
 #include "schedulingConfig.h"
 
-#if ( configUSE_EDF == 1 )
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 0 ) )
 /**
  * Run EDF test case 4 (explicit deadlines):
  * - 3 periodic tasks, all created at startup.
