@@ -612,21 +612,17 @@ PRIVILEGED_DATA static volatile configRUN_TIME_COUNTER_TYPE ulTotalRunTime[ conf
                                                 TickType_t xNextReleaseTime ) PRIVILEGED_FUNCTION;
     #if ( configUSE_SRP == 1 )
         #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
-            static const UBaseType_t uxSRPResourceCapacityTable[ configSRP_RESOURCE_TYPE_COUNT ] = configSRP_RESOURCE_CAPACITY_TABLE;
             static UBaseType_t uxSRPResourceBlockingCeilingTable[ configSRP_RESOURCE_TYPE_COUNT ];
-            static UBaseType_t uxSRPResourceActiveCount[ configSRP_RESOURCE_TYPE_COUNT ];
+            static UBaseType_t uxSRPResourceActiveCount[ configSRP_RESOURCE_TYPE_COUNT ]; /* Boolean-like lock state: 0 unlocked, 1 locked. */
         #endif
 
-        static BaseType_t prvSRPValidateResourceTable( void ) PRIVILEGED_FUNCTION;
-        static BaseType_t prvSRPValidateResourceClaims( const SRPResourceClaim_t * pxResourceClaims,
-                                                        UBaseType_t uxResourceClaimsCount ) PRIVILEGED_FUNCTION;
-        static BaseType_t prvSRPValidateParams( TickType_t xT,
-                                                TickType_t xWCET,
-                                                TickType_t xRelD ) PRIVILEGED_FUNCTION;
+        static BaseType_t prvSRPValidateResourceClaims( const UBaseType_t * puxClaimedSemaphores,
+                                                        UBaseType_t uxClaimedSemaphoreCount ) PRIVILEGED_FUNCTION;
         static void prvSRPRecomputeSystemCeiling( void ) PRIVILEGED_FUNCTION;
         static void prvSRPForceReleaseResourcesForTask( TCB_t * pxTCB,
                                                         UBaseType_t * puxReleasedCounts ) PRIVILEGED_FUNCTION;
         static TCB_t * prvSRPSelectReadyTask( void ) PRIVILEGED_FUNCTION;
+        static UBaseType_t prvSRPComputePreemptionLevel( TickType_t xRelDeadlineTicks ) PRIVILEGED_FUNCTION;
     #endif
 #endif
 
@@ -1947,80 +1943,48 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
 /*-----------------------------------------------------------*/
 
     #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
-        static BaseType_t prvSRPValidateResourceTable( void )
+        static BaseType_t prvSRPValidateResourceClaims( const UBaseType_t * puxClaimedSemaphores,
+                                                        UBaseType_t uxClaimedSemaphoreCount )
         {
-            UBaseType_t uxResourceType;
+            UBaseType_t uxClaim, uxOther;
 
-            #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
-                for( uxResourceType = 0U; uxResourceType < ( UBaseType_t ) configSRP_RESOURCE_TYPE_COUNT; uxResourceType++ )
-                {
-                    if( uxSRPResourceCapacityTable[ uxResourceType ] == 0U )
-                    {
-                        return pdFALSE;
-                    }
-
-                }
-            #endif
-
-            return pdTRUE;
-        }
-    /*-----------------------------------------------------------*/
-
-        static BaseType_t prvSRPValidateResourceClaims( const SRPResourceClaim_t * pxResourceClaims,
-                                                        UBaseType_t uxResourceClaimsCount )
-        {
-            UBaseType_t uxClaim;
-
-            if( uxResourceClaimsCount == 0U )
+            if( uxClaimedSemaphoreCount == 0U )
             {
                 return pdTRUE;
             }
 
-            if( pxResourceClaims == NULL )
+            if( puxClaimedSemaphores == NULL )
             {
                 return pdFALSE;
             }
 
-            for( uxClaim = 0U; uxClaim < uxResourceClaimsCount; uxClaim++ )
+            for( uxClaim = 0U; uxClaim < uxClaimedSemaphoreCount; uxClaim++ )
             {
-                const UBaseType_t uxResourceType = pxResourceClaims[ uxClaim ].uxResourceType;
-                const UBaseType_t uxMaxCount = pxResourceClaims[ uxClaim ].uxMaxCount;
-
-                if( uxMaxCount == 0U )
-                {
-                    return pdFALSE;
-                }
-
+                const UBaseType_t uxResourceType = puxClaimedSemaphores[ uxClaim ];
                 if( uxResourceType >= ( UBaseType_t ) configSRP_RESOURCE_TYPE_COUNT )
                 {
                     return pdFALSE;
                 }
 
-                #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
-                    if( uxMaxCount > uxSRPResourceCapacityTable[ uxResourceType ] )
+                for( uxOther = uxClaim + 1U; uxOther < uxClaimedSemaphoreCount; uxOther++ )
+                {
+                    if( puxClaimedSemaphores[ uxOther ] == uxResourceType )
                     {
                         return pdFALSE;
                     }
-                #endif
+                }
             }
 
             return pdTRUE;
         }
+
     /*-----------------------------------------------------------*/
 
-        static BaseType_t prvSRPValidateParams( TickType_t xT,
-                                                TickType_t xWCET,
-                                                TickType_t xRelD )
+        static UBaseType_t prvSRPComputePreemptionLevel( TickType_t xRelDeadlineTicks )
         {
-            if( ( xT > ( TickType_t ) 0U ) &&
-                ( xWCET > ( TickType_t ) 0U ) &&
-                ( xRelD > ( TickType_t ) 0U ) &&
-                ( xRelD <= xT ) )
-            {
-                return pdTRUE;
-            }
+            configASSERT( xRelDeadlineTicks > 0U );
 
-            return pdFALSE;
+            return ( UBaseType_t ) ( portMAX_DELAY - xRelDeadlineTicks );
         }
 
     /*-----------------------------------------------------------*/
@@ -2038,40 +2002,29 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                 {
                     UBaseType_t uxResourceBlockingCeiling = ( UBaseType_t ) 0U;
 
-                    if( uxSRPResourceActiveCount[ uxResourceType ] > 0U )
+                    /* Static ceiling for this binary resource:
+                     * highest preemption level among tasks that may lock it. */
+                    if( listLIST_IS_INITIALISED( &xSRPTaskRegistryList ) != pdFALSE )
                     {
-                        const UBaseType_t uxAvailable = uxSRPResourceCapacityTable[ uxResourceType ] - uxSRPResourceActiveCount[ uxResourceType ];
-
-                        /* Runtime blocking ceiling for this active resource:
-                        * highest preemption level among tasks that could be blocked
-                        * by the currently available units. */
-                        if( listLIST_IS_INITIALISED( &xSRPTaskRegistryList ) != pdFALSE )
+                        for( pxItem = listGET_HEAD_ENTRY( &xSRPTaskRegistryList );
+                            pxItem != listGET_END_MARKER( &xSRPTaskRegistryList );
+                            pxItem = listGET_NEXT( pxItem ) )
                         {
-                            for( pxItem = listGET_HEAD_ENTRY( &xSRPTaskRegistryList );
-                                pxItem != listGET_END_MARKER( &xSRPTaskRegistryList );
-                                pxItem = listGET_NEXT( pxItem ) )
+                            const TCB_t * pxTCB = ( const TCB_t * ) listGET_LIST_ITEM_OWNER( pxItem );
+                            const UBaseType_t uxTaskClaimed = pxTCB->uxSRPResourceClaimMax[ uxResourceType ];
+
+                            if( ( uxTaskClaimed != 0U ) &&
+                                ( pxTCB->uxPriorityCeiling > uxResourceBlockingCeiling ) )
                             {
-                                const TCB_t * pxTCB = ( const TCB_t * ) listGET_LIST_ITEM_OWNER( pxItem );
-                                const UBaseType_t uxTaskClaimed = pxTCB->uxSRPResourceClaimMax[ uxResourceType ];
-                                const UBaseType_t uxTaskHeld = pxTCB->uxSRPResourceHeldCount[ uxResourceType ];
-
-                                if( uxTaskClaimed > uxTaskHeld )
-                                {
-                                    const UBaseType_t uxTaskRemainingClaim = uxTaskClaimed - uxTaskHeld;
-
-                                    if( ( uxTaskRemainingClaim > uxAvailable ) &&
-                                        ( pxTCB->uxPriorityCeiling > uxResourceBlockingCeiling ) )
-                                    {
-                                        uxResourceBlockingCeiling = pxTCB->uxPriorityCeiling;
-                                    }
-                                }
+                                uxResourceBlockingCeiling = pxTCB->uxPriorityCeiling;
                             }
                         }
                     }
 
                     uxSRPResourceBlockingCeilingTable[ uxResourceType ] = uxResourceBlockingCeiling;
 
-                    if( uxResourceBlockingCeiling > uxMaxCeiling )
+                    if( ( uxSRPResourceActiveCount[ uxResourceType ] != 0U ) &&
+                        ( uxResourceBlockingCeiling > uxMaxCeiling ) )
                     {
                         uxMaxCeiling = uxResourceBlockingCeiling;
                     }
@@ -2152,39 +2105,23 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                         {
                             TCB_t * pxCandidateTCB = ( TCB_t * ) listGET_LIST_ITEM_OWNER( pxItem );
                             BaseType_t xCandidateHoldsResource = pdFALSE;
-                            BaseType_t xCandidateClaimFitsCurrentAvailability = pdTRUE;
 
                             for( UBaseType_t uxResourceType = 0U;
                                 uxResourceType < ( UBaseType_t ) configSRP_RESOURCE_TYPE_COUNT;
                                 uxResourceType++ )
                             {
                                 const UBaseType_t uxTaskHeld = pxCandidateTCB->uxSRPResourceHeldCount[ uxResourceType ];
-                                const UBaseType_t uxTaskClaimed = pxCandidateTCB->uxSRPResourceClaimMax[ uxResourceType ];
 
                                 if( uxTaskHeld > 0U )
                                 {
                                     xCandidateHoldsResource = pdTRUE;
                                 }
-
-                                if( uxTaskClaimed > 0U )
-                                {
-                                    const UBaseType_t uxAvailable = uxSRPResourceCapacityTable[ uxResourceType ] - uxSRPResourceActiveCount[ uxResourceType ];
-
-                                    if( uxTaskClaimed > ( uxAvailable + uxTaskHeld ) )
-                                    {
-                                        xCandidateClaimFitsCurrentAvailability = pdFALSE;
-                                        break;
-                                    }
-                                }
                             }
 
                             /* A task that already holds resources must be allowed to resume,
-                            * otherwise it can be blocked by the ceiling induced by its own lock.
-                            * Use claim <= available + held so this remains valid when held counts
-                            * change dynamically over time. */
+                            * otherwise it can be blocked by the ceiling induced by its own lock. */
                             if( ( pxCandidateTCB->uxPriorityCeiling > uxSystemCeiling ) ||
-                                ( ( xCandidateHoldsResource != pdFALSE ) &&
-                                ( xCandidateClaimFitsCurrentAvailability != pdFALSE ) ) )
+                                ( xCandidateHoldsResource != pdFALSE ) )
                             {
                                 pxSelectedTCB = pxCandidateTCB;
                                 break;
@@ -2203,8 +2140,9 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                                             UBaseType_t uxCount )
         {
             BaseType_t xReturn = pdFAIL;
+            BaseType_t xTaskAlreadyHoldsResource = pdFALSE;
 
-            if( ( uxCount == 0U ) ||
+            if( ( uxCount != 1U ) ||
                 ( uxResourceType >= ( UBaseType_t ) configSRP_RESOURCE_TYPE_COUNT ) )
             {
                 return pdFAIL;
@@ -2213,21 +2151,33 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
             taskENTER_CRITICAL();
             {
                 #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
-                    const UBaseType_t uxCapacity = uxSRPResourceCapacityTable[ uxResourceType ];
                     const UBaseType_t uxActive = uxSRPResourceActiveCount[ uxResourceType ];
 
                     if( pxCurrentTCB != NULL )
                     {
                         const UBaseType_t uxTaskClaimed = pxCurrentTCB->uxSRPResourceClaimMax[ uxResourceType ];
                         const UBaseType_t uxTaskHeld = pxCurrentTCB->uxSRPResourceHeldCount[ uxResourceType ];
+                        UBaseType_t uxHeldResourceType;
+
+                        for( uxHeldResourceType = 0U;
+                             uxHeldResourceType < ( UBaseType_t ) configSRP_RESOURCE_TYPE_COUNT;
+                             uxHeldResourceType++ )
+                        {
+                            if( pxCurrentTCB->uxSRPResourceHeldCount[ uxHeldResourceType ] != 0U )
+                            {
+                                xTaskAlreadyHoldsResource = pdTRUE;
+                                break;
+                            }
+                        }
 
                         if( ( uxTaskClaimed > 0U ) &&
-                            ( pxCurrentTCB->uxPriorityCeiling > uxSystemCeiling ) &&
-                            ( uxCount <= ( uxTaskClaimed - uxTaskHeld ) ) &&
-                            ( uxCount <= ( uxCapacity - uxActive ) ) )
+                            ( uxTaskHeld == 0U ) &&
+                            ( uxActive == 0U ) &&
+                            ( ( pxCurrentTCB->uxPriorityCeiling > uxSystemCeiling ) ||
+                              ( xTaskAlreadyHoldsResource != pdFALSE ) ) )
                         {
-                            uxSRPResourceActiveCount[ uxResourceType ] = uxActive + uxCount;
-                            pxCurrentTCB->uxSRPResourceHeldCount[ uxResourceType ] = uxTaskHeld + uxCount;
+                            uxSRPResourceActiveCount[ uxResourceType ] = 1U;
+                            pxCurrentTCB->uxSRPResourceHeldCount[ uxResourceType ] = 1U;
                             prvSRPRecomputeSystemCeiling();
                             xReturn = pdPASS;
                         }
@@ -2247,7 +2197,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
             BaseType_t xReturn = pdFAIL;
             TCB_t * pxReleasedFromTCB = NULL;
 
-            if( ( uxCount == 0U ) ||
+            if( ( uxCount != 1U ) ||
                 ( uxResourceType >= ( UBaseType_t ) configSRP_RESOURCE_TYPE_COUNT ) )
             {
                 return pdFAIL;
@@ -2262,11 +2212,11 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                     {
                         const UBaseType_t uxTaskHeld = pxCurrentTCB->uxSRPResourceHeldCount[ uxResourceType ];
 
-                        if( ( uxTaskHeld >= uxCount ) &&
-                            ( uxActive >= uxCount ) )
+                        if( ( uxTaskHeld == 1U ) &&
+                            ( uxActive == 1U ) )
                         {
-                            uxSRPResourceActiveCount[ uxResourceType ] = uxActive - uxCount;
-                            pxCurrentTCB->uxSRPResourceHeldCount[ uxResourceType ] = uxTaskHeld - uxCount;
+                            uxSRPResourceActiveCount[ uxResourceType ] = 0U;
+                            pxCurrentTCB->uxSRPResourceHeldCount[ uxResourceType ] = 0U;
                             pxReleasedFromTCB = pxCurrentTCB;
                             prvSRPRecomputeSystemCeiling();
                             xReturn = pdPASS;
@@ -2403,9 +2353,8 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                                     uint32_t ulPeriodMs,
                                     uint32_t ulWcetMs,
                                     uint32_t ulRelDeadlineMs,
-                                    uint32_t ulPriorityCeiling,
-                                    const SRPResourceClaim_t * const pxResourceClaims,
-                                    UBaseType_t uxResourceClaimsCount )
+                                    const UBaseType_t * const puxClaimedSemaphores, // array of claimed sempahore IDs
+                                    UBaseType_t uxClaimedSemaphoreCount)
             {
                 TCB_t * pxNewTCB;
                 BaseType_t xReturn;
@@ -2418,28 +2367,22 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                 xWcetTicks = pdMS_TO_TICKS( ulWcetMs );
                 xRelDeadlineTicks = pdMS_TO_TICKS( ulRelDeadlineMs );
 
-                traceENTER_xTaskCreate( pxTaskCode, pcName, uxStackDepth, pvParameters, ulPriorityCeiling, pxCreatedTask );
+                traceENTER_xTaskCreate( pxTaskCode, pcName, uxStackDepth, pvParameters, ( configMAX_PRIORITIES - 1 ), pxCreatedTask );
 
-                if( ulPriorityCeiling >= configMAX_PRIORITIES )
+                // SRP is a subset of EDF and SRP valid checks do not require any additional check on top of EDF
+                if( prvEDFValidateParams( xPeriodTicks, xWcetTicks, xRelDeadlineTicks ) == pdFALSE )
                 {
                     traceRETURN_xTaskCreate( pdFAIL );
                     return pdFAIL;
                 }
 
-                if( prvSRPValidateParams( xPeriodTicks, xWcetTicks, xRelDeadlineTicks ) == pdFALSE )
+                if( prvSRPValidateResourceClaims( puxClaimedSemaphores, uxClaimedSemaphoreCount ) == pdFALSE )
                 {
                     traceRETURN_xTaskCreate( pdFAIL );
                     return pdFAIL;
                 }
 
-                if( ( prvSRPValidateResourceTable() == pdFALSE ) ||
-                    ( prvSRPValidateResourceClaims( pxResourceClaims, uxResourceClaimsCount ) == pdFALSE ) )
-                {
-                    traceRETURN_xTaskCreate( pdFAIL );
-                    return pdFAIL;
-                }
-
-                pxNewTCB = prvCreateTask( pxTaskCode, pcName, uxStackDepth, pvParameters, ulPriorityCeiling, pxCreatedTask );
+                pxNewTCB = prvCreateTask( pxTaskCode, pcName, uxStackDepth, pvParameters, ( configMAX_PRIORITIES - 1 ), pxCreatedTask );
 
                 if( pxNewTCB != NULL )
                 {
@@ -2451,7 +2394,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                     #endif
 
                     /* SRP metadata used for resource access management. */
-                    pxNewTCB->uxPriorityCeiling = ulPriorityCeiling;
+                    pxNewTCB->uxPriorityCeiling = prvSRPComputePreemptionLevel( xRelDeadlineTicks );
                     pxNewTCB->xSrpCeilingTick = portMAX_DELAY;
 
                     #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
@@ -2463,14 +2406,10 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                                         0,
                                         sizeof( pxNewTCB->uxSRPResourceHeldCount ) );
 
-                        for( uxClaim = 0U; uxClaim < uxResourceClaimsCount; uxClaim++ )
+                        for( uxClaim = 0U; uxClaim < uxClaimedSemaphoreCount; uxClaim++ )
                         {
-                            const UBaseType_t uxResourceType = pxResourceClaims[ uxClaim ].uxResourceType;
-
-                            if( pxResourceClaims[ uxClaim ].uxMaxCount > pxNewTCB->uxSRPResourceClaimMax[ uxResourceType ] )
-                            {
-                                pxNewTCB->uxSRPResourceClaimMax[ uxResourceType ] = pxResourceClaims[ uxClaim ].uxMaxCount;
-                            }
+                            const UBaseType_t uxResourceType = puxClaimedSemaphores[ uxClaim ];
+                            pxNewTCB->uxSRPResourceClaimMax[ uxResourceType ] = 1U;
                         }
                     }
                     #endif
@@ -3455,6 +3394,18 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
                                                        &xEDFTaskRegistryList,
                                                        xTimeToWake );
                 }
+
+                #if ( configUSE_SRP == 1 )
+                {
+                    if( listLIST_ITEM_CONTAINER( &( pxCurrentTCB->xSRPTaskListItem ) ) == &xSRPTaskRegistryList )
+                    {
+                        prvPeriodicTaskAdvanceAndReinsert( pxCurrentTCB,
+                                                           &( pxCurrentTCB->xSRPTaskListItem ),
+                                                           &xSRPTaskRegistryList,
+                                                           xTimeToWake );
+                    }
+                }
+                #endif
             }
             #endif
 
@@ -6289,7 +6240,12 @@ BaseType_t xTaskIncrementTick( void )
                          * this is equivalent to EDF selection. */
                         pxCurrentTCB = pxTCB;
                     }
-                    else /* No SRP-eligible task at current ceiling, fallback to base selection. */
+                    else if( listLIST_IS_EMPTY( &xReadySRPTasksList ) == pdFALSE )
+                    {
+                        /* Defensive fallback stays within the EDF/SRP ready list. */
+                        pxCurrentTCB = ( TCB_t * ) listGET_OWNER_OF_HEAD_ENTRY( &xReadySRPTasksList );
+                    }
+                    else
                     {
                         taskSELECT_HIGHEST_PRIORITY_TASK();
                     }

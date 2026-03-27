@@ -9,15 +9,10 @@
 #endif
 
 
-/* SRP global resource table configuration.
- * Resource types are indexed from 0..(configSRP_RESOURCE_TYPE_COUNT-1).
- * Each table entry is the maximum available count for that resource type. */
+/* SRP global resource configuration.
+ * Resource types are indexed from 0..(configSRP_RESOURCE_TYPE_COUNT-1). */
 #ifndef configSRP_RESOURCE_TYPE_COUNT
 	#define configSRP_RESOURCE_TYPE_COUNT 0U
-#endif
-
-#ifndef configSRP_RESOURCE_CAPACITY_TABLE
-	#define configSRP_RESOURCE_CAPACITY_TABLE { 1U }
 #endif
 
 /* Each table entry is the SRP ceiling for that resource type.

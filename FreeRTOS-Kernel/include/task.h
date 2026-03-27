@@ -189,11 +189,6 @@ typedef enum
 } eSleepModeStatus;
 
 #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
-    typedef struct xSRP_RESOURCE_CLAIM
-    {
-        UBaseType_t uxResourceType;
-        UBaseType_t uxMaxCount;
-    } SRPResourceClaim_t;
 
     #if ( configUSE_SRP_RESOURCE_RELEASE_HOOK == 1 )
         /* Optional application callback invoked after SRP units are released.
@@ -407,9 +402,8 @@ typedef enum
                                     uint32_t ulPeriodMs,
                                     uint32_t ulWcetMs,
                                     uint32_t ulRelDeadlineMs,
-                                    uint32_t ulPriorityCeiling,
-                                    const SRPResourceClaim_t * const pxResourceClaims,
-                                    UBaseType_t uxResourceClaimsCount ) PRIVILEGED_FUNCTION;
+                                    const UBaseType_t * const puxClaimedSemaphores, // array of claimed sempahore IDs
+                                    UBaseType_t uxClaimedSemaphoreCount) PRIVILEGED_FUNCTION;
         #else // EDF tasks (no SRP)
             BaseType_t xTaskCreate( TaskFunction_t pxTaskCode,
                                     const char * const pcName,
