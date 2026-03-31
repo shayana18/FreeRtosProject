@@ -3204,7 +3204,7 @@ typedef struct xSTATIC_TCB
         StaticListItem_t xEDFTaskListItem;   /**< Mirrors TCB_t::xEDFTaskListItem for static allocation size compatibility. */
         #if ( configUSE_SRP == 1 )
             UBaseType_t uxPriorityCeiling;       /**< Mirrors TCB_t::uxPriorityCeiling for static allocation size compatibility. */
-            TickType_t xSrpCeilingTick;          /**< Mirrors TCB_t::xSrpCeilingTick for static allocation size compatibility. */
+            configSTACK_DEPTH_TYPE uxStackDepthWords; /**< Mirrors TCB_t::uxStackDepthWords for static allocation size compatibility. */
             StaticListItem_t xSRPTaskListItem;   /**< Mirrors TCB_t::xSRPTaskListItem for static allocation size compatibility. */
             #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
                 UBaseType_t uxSRPResourceClaimMax[ configSRP_RESOURCE_TYPE_COUNT ];

@@ -417,7 +417,7 @@ typedef struct tskTaskControlBlock       /* The old naming convention is used to
     #endif
     #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
         UBaseType_t uxPriorityCeiling;       /**< Static SRP preemption level for this task. */
-        TickType_t xSrpCeilingTick;          /**< Tick threshold used by existing SRP logic. */
+        configSTACK_DEPTH_TYPE uxStackDepthWords; /**< Requested task stack depth in StackType_t words. */
         ListItem_t xSRPTaskListItem;         /**< Used to keep SRP tasks in the SRP task registry list. */
         #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
             UBaseType_t uxSRPResourceClaimMax[ configSRP_RESOURCE_TYPE_COUNT ]; /**< Declared max claim per resource type for this task. */
@@ -523,6 +523,30 @@ PRIVILEGED_DATA static List_t pxReadyTasksLists[ configMAX_PRIORITIES ]; /**< Pr
     PRIVILEGED_DATA static List_t xReadySRPTasksList;
     PRIVILEGED_DATA static List_t xSRPTaskRegistryList;
     PRIVILEGED_DATA static UBaseType_t uxSystemCeiling = ( UBaseType_t ) 0U;
+
+    typedef struct xSRPSharedStackRegion
+    {
+        UBaseType_t uxPreemptionLevel;
+        configSTACK_DEPTH_TYPE uxRegionDepthWords;
+        StackType_t * pxRegionBase;
+    } SRPSharedStackRegion_t;
+
+    #if ( configSRP_SHARED_STACK_SIZE == 0U )
+        #error configSRP_SHARED_STACK_SIZE must be > 0 when configUSE_EDF == 1 and configUSE_SRP == 1.
+    #endif
+
+    #if ( configSRP_SHARED_STACK_MAX_LEVELS == 0U )
+        #error configSRP_SHARED_STACK_MAX_LEVELS must be > 0 when configUSE_EDF == 1 and configUSE_SRP == 1.
+    #endif
+
+    #if ( tskSTATIC_AND_DYNAMIC_ALLOCATION_POSSIBLE == 0 )
+        #error SRP shared stack support requires tskSTATIC_AND_DYNAMIC_ALLOCATION_POSSIBLE != 0.
+    #endif
+
+    PRIVILEGED_DATA static StackType_t xSRPSharedStackBuffer[ configSRP_SHARED_STACK_SIZE ];
+    PRIVILEGED_DATA static SRPSharedStackRegion_t xSRPSharedStackRegions[ configSRP_SHARED_STACK_MAX_LEVELS ];
+    PRIVILEGED_DATA static UBaseType_t uxSRPSharedStackRegionCount = 0U;
+    PRIVILEGED_DATA static configSTACK_DEPTH_TYPE uxSRPSharedStackUsedDepthWords = 0U;
 #endif
 PRIVILEGED_DATA static List_t xDelayedTaskList1;                         /**< Delayed tasks. */
 PRIVILEGED_DATA static List_t xDelayedTaskList2;                         /**< Delayed tasks (two lists are used - one for delays that have overflowed the current tick count. */
@@ -623,6 +647,9 @@ PRIVILEGED_DATA static volatile configRUN_TIME_COUNTER_TYPE ulTotalRunTime[ conf
                                                         UBaseType_t * puxReleasedCounts ) PRIVILEGED_FUNCTION;
         static TCB_t * prvSRPSelectReadyTask( void ) PRIVILEGED_FUNCTION;
         static UBaseType_t prvSRPComputePreemptionLevel( TickType_t xRelDeadlineTicks ) PRIVILEGED_FUNCTION;
+        static BaseType_t prvSRPAssignSharedStackRegion( UBaseType_t uxPreemptionLevel,
+                                                         configSTACK_DEPTH_TYPE uxNewTaskStackDepth,
+                                                         StackType_t ** ppxAssignedStackBase ) PRIVILEGED_FUNCTION;
     #endif
 #endif
 
@@ -1989,6 +2016,101 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
 
     /*-----------------------------------------------------------*/
 
+        static BaseType_t prvSRPAssignSharedStackRegion( UBaseType_t uxPreemptionLevel,
+                                                         configSTACK_DEPTH_TYPE uxNewTaskStackDepth,
+                                                         StackType_t ** ppxAssignedStackBase )
+        {
+            UBaseType_t uxRegionIndex;
+            configSTACK_DEPTH_TYPE uxRequiredDepth = uxNewTaskStackDepth;
+
+            if( ( ppxAssignedStackBase == NULL ) ||
+                ( uxNewTaskStackDepth == ( configSTACK_DEPTH_TYPE ) 0U ) )
+            {
+                return pdFALSE;
+            }
+
+            if( listLIST_IS_INITIALISED( &xSRPTaskRegistryList ) != pdFALSE )
+            {
+                ListItem_t * pxItem;
+
+                for( pxItem = listGET_HEAD_ENTRY( &xSRPTaskRegistryList );
+                     pxItem != listGET_END_MARKER( &xSRPTaskRegistryList );
+                     pxItem = listGET_NEXT( pxItem ) )
+                {
+                    const TCB_t * pxTCB = ( const TCB_t * ) listGET_LIST_ITEM_OWNER( pxItem );
+
+                    if( ( pxTCB->uxPriorityCeiling == uxPreemptionLevel ) &&
+                        ( pxTCB->uxStackDepthWords > uxRequiredDepth ) )
+                    {
+                        uxRequiredDepth = pxTCB->uxStackDepthWords;
+                    }
+                }
+            }
+
+            for( uxRegionIndex = 0U; uxRegionIndex < uxSRPSharedStackRegionCount; uxRegionIndex++ )
+            {
+                if( xSRPSharedStackRegions[ uxRegionIndex ].uxPreemptionLevel == uxPreemptionLevel )
+                {
+                    const configSTACK_DEPTH_TYPE uxCurrentDepth = xSRPSharedStackRegions[ uxRegionIndex ].uxRegionDepthWords;
+
+                    if( uxRequiredDepth > uxCurrentDepth )
+                    {
+                        const configSTACK_DEPTH_TYPE uxGrowth = uxRequiredDepth - uxCurrentDepth;
+
+                        if( uxRegionIndex != ( uxSRPSharedStackRegionCount - 1U ) )
+                        {
+                            /* Region layout is fixed and not reorganized after creation. */
+                            return pdFALSE;
+                        }
+
+                        if( ( uxSRPSharedStackUsedDepthWords + uxGrowth ) > ( configSTACK_DEPTH_TYPE ) configSRP_SHARED_STACK_SIZE )
+                        {
+                            return pdFALSE;
+                        }
+
+                        xSRPSharedStackRegions[ uxRegionIndex ].uxRegionDepthWords = uxRequiredDepth;
+                        uxSRPSharedStackUsedDepthWords = ( configSTACK_DEPTH_TYPE ) ( uxSRPSharedStackUsedDepthWords + uxGrowth );
+                    }
+
+                    *ppxAssignedStackBase = xSRPSharedStackRegions[ uxRegionIndex ].pxRegionBase;
+                    return pdTRUE;
+                }
+            }
+
+            if( uxSRPSharedStackRegionCount >= ( UBaseType_t ) configSRP_SHARED_STACK_MAX_LEVELS )
+            {
+                return pdFALSE;
+            }
+
+            if( uxSRPSharedStackRegionCount > 0U )
+            {
+                const UBaseType_t uxLastRegion = uxSRPSharedStackRegionCount - 1U;
+
+                if( uxPreemptionLevel < xSRPSharedStackRegions[ uxLastRegion ].uxPreemptionLevel )
+                {
+                    /* Shared regions are ordered by preemption level and not reorganized. */
+                    return pdFALSE;
+                }
+            }
+
+            if( ( uxSRPSharedStackUsedDepthWords + uxRequiredDepth ) > ( configSTACK_DEPTH_TYPE ) configSRP_SHARED_STACK_SIZE )
+            {
+                return pdFALSE;
+            }
+
+            xSRPSharedStackRegions[ uxSRPSharedStackRegionCount ].uxPreemptionLevel = uxPreemptionLevel;
+            xSRPSharedStackRegions[ uxSRPSharedStackRegionCount ].uxRegionDepthWords = uxRequiredDepth;
+            xSRPSharedStackRegions[ uxSRPSharedStackRegionCount ].pxRegionBase = &xSRPSharedStackBuffer[ uxSRPSharedStackUsedDepthWords ];
+
+            *ppxAssignedStackBase = xSRPSharedStackRegions[ uxSRPSharedStackRegionCount ].pxRegionBase;
+            uxSRPSharedStackUsedDepthWords = ( configSTACK_DEPTH_TYPE ) ( uxSRPSharedStackUsedDepthWords + uxRequiredDepth );
+            uxSRPSharedStackRegionCount++;
+
+            return pdTRUE;
+        }
+
+    /*-----------------------------------------------------------*/
+
         static void prvSRPRecomputeSystemCeiling( void )
         {
             #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
@@ -2240,6 +2362,48 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
             return xReturn;
         }
 
+    /*-----------------------------------------------------------*/
+
+        void vTaskGetSRPSharedStackUsage( size_t * puxSharedBytes,
+                                          size_t * puxPerTaskBytes )
+        {
+            size_t uxSharedBytes = 0U;
+            size_t uxPerTaskBytes = 0U;
+            UBaseType_t uxRegionIndex;
+
+            taskENTER_CRITICAL();
+            {
+                for( uxRegionIndex = 0U; uxRegionIndex < uxSRPSharedStackRegionCount; uxRegionIndex++ )
+                {
+                    uxSharedBytes += ( ( size_t ) xSRPSharedStackRegions[ uxRegionIndex ].uxRegionDepthWords ) * sizeof( StackType_t );
+                }
+
+                if( listLIST_IS_INITIALISED( &xSRPTaskRegistryList ) != pdFALSE )
+                {
+                    ListItem_t * pxItem;
+
+                    for( pxItem = listGET_HEAD_ENTRY( &xSRPTaskRegistryList );
+                         pxItem != listGET_END_MARKER( &xSRPTaskRegistryList );
+                         pxItem = listGET_NEXT( pxItem ) )
+                    {
+                        const TCB_t * pxTCB = ( const TCB_t * ) listGET_LIST_ITEM_OWNER( pxItem );
+                        uxPerTaskBytes += ( ( size_t ) pxTCB->uxStackDepthWords ) * sizeof( StackType_t );
+                    }
+                }
+            }
+            taskEXIT_CRITICAL();
+
+            if( puxSharedBytes != NULL )
+            {
+                *puxSharedBytes = uxSharedBytes;
+            }
+
+            if( puxPerTaskBytes != NULL )
+            {
+                *puxPerTaskBytes = uxPerTaskBytes;
+            }
+        }
+
     #endif /* ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) */
 #endif
 /*-----------------------------------------------------------*/
@@ -2358,6 +2522,8 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
             {
                 TCB_t * pxNewTCB;
                 BaseType_t xReturn;
+                UBaseType_t uxPreemptionLevel;
+                StackType_t * pxSharedStackBase = NULL;
                 #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
                     UBaseType_t uxClaim;
                 #endif
@@ -2382,7 +2548,55 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                     return pdFAIL;
                 }
 
-                pxNewTCB = prvCreateTask( pxTaskCode, pcName, uxStackDepth, pvParameters, ( configMAX_PRIORITIES - 1 ), pxCreatedTask );
+                uxPreemptionLevel = prvSRPComputePreemptionLevel( xRelDeadlineTicks );
+
+                if( xSchedulerRunning != pdFALSE )
+                {
+                    traceRETURN_xTaskCreate( pdFAIL );
+                    return pdFAIL;
+                }
+
+                taskENTER_CRITICAL();
+                {
+                    if( prvSRPAssignSharedStackRegion( uxPreemptionLevel,
+                                                       uxStackDepth,
+                                                       &pxSharedStackBase ) == pdFALSE )
+                    {
+                        pxSharedStackBase = NULL;
+                    }
+                }
+                taskEXIT_CRITICAL();
+
+                if( pxSharedStackBase == NULL )
+                {
+                    traceRETURN_xTaskCreate( pdFAIL );
+                    return pdFAIL;
+                }
+
+                /* SRP tasks use shared stack storage keyed by preemption level. */
+                pxNewTCB = ( TCB_t * ) pvPortMalloc( sizeof( TCB_t ) );
+
+                if( pxNewTCB != NULL )
+                {
+                    ( void ) memset( ( void * ) pxNewTCB, 0x00, sizeof( TCB_t ) );
+                    pxNewTCB->pxStack = pxSharedStackBase;
+
+                    #if ( tskSTATIC_AND_DYNAMIC_ALLOCATION_POSSIBLE != 0 )
+                    {
+                        /* TCB is dynamic while stack is shared static kernel storage. */
+                        pxNewTCB->ucStaticallyAllocated = tskSTATICALLY_ALLOCATED_STACK_ONLY;
+                    }
+                    #endif
+
+                    prvInitialiseNewTask( pxTaskCode,
+                                          pcName,
+                                          uxStackDepth,
+                                          pvParameters,
+                                          ( configMAX_PRIORITIES - 1 ),
+                                          pxCreatedTask,
+                                          pxNewTCB,
+                                          NULL );
+                }
 
                 if( pxNewTCB != NULL )
                 {
@@ -2394,8 +2608,8 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                     #endif
 
                     /* SRP metadata used for resource access management. */
-                    pxNewTCB->uxPriorityCeiling = prvSRPComputePreemptionLevel( xRelDeadlineTicks );
-                    pxNewTCB->xSrpCeilingTick = portMAX_DELAY;
+                    pxNewTCB->uxPriorityCeiling = uxPreemptionLevel;
+                    pxNewTCB->uxStackDepthWords = uxStackDepth;
 
                     #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
                     {
@@ -2736,7 +2950,7 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
     #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
     {
         pxNewTCB->uxPriorityCeiling = uxPriority;
-        pxNewTCB->xSrpCeilingTick = portMAX_DELAY;
+        pxNewTCB->uxStackDepthWords = ( configSTACK_DEPTH_TYPE ) 0U;
 
         #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
         {
@@ -7188,6 +7402,8 @@ static void prvInitialiseTaskLists( void )
         {
             vListInitialise( &xReadySRPTasksList );
             vListInitialise( &xSRPTaskRegistryList );
+            uxSRPSharedStackRegionCount = 0U;
+            uxSRPSharedStackUsedDepthWords = ( configSTACK_DEPTH_TYPE ) 0U;
         }
         #endif
     #endif

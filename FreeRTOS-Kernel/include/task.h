@@ -199,6 +199,12 @@ typedef enum
                                                  UBaseType_t uxCount,
                                                  BaseType_t xForcedRelease );
     #endif
+
+    /* Reports SRP shared-stack usage in bytes.
+     * puxSharedBytes receives the bytes reserved in the shared stack pool.
+     * puxPerTaskBytes receives the bytes that per-task allocation would use. */
+    void vTaskGetSRPSharedStackUsage( size_t * puxSharedBytes,
+                                      size_t * puxPerTaskBytes );
 #endif
 
 /**
