@@ -1,522 +1,195 @@
-# SRP Design and Current Status
+# SRP Design (Current Implementation)
 
-This document explains the SRP logic currently implemented on top of the EDF scheduler, the purpose of each major SRP component, the current limitations of the implementation, and the additional work still required to fully meet Task 2 of the assignment.
+This document describes the current SRP implementation in this repository as of March 31, 2026, including EDF integration, resource protocol behavior, and SRP stack sharing.
 
-The important framing point is:
+## 1. Configuration Model
 
-- `configUSE_EDF == 0`: use stock FreeRTOS fixed-priority scheduling.
-- `configUSE_EDF == 1 && configUSE_SRP == 0`: use EDF only.
-- `configUSE_EDF == 1 && configUSE_SRP == 1`: use EDF + SRP.
+SRP is only available on top of EDF.
 
-SRP is therefore treated as an extension of EDF, not as a standalone scheduler.
+- `configUSE_EDF == 0`: stock FreeRTOS scheduling.
+- `configUSE_EDF == 1 && configUSE_SRP == 0`: EDF only.
+- `configUSE_EDF == 1 && configUSE_SRP == 1`: EDF + SRP.
 
-## 1. Why SRP Exists Here
+Relevant SRP-related configuration:
 
-EDF decides which ready task is most urgent by deadline. That solves CPU scheduling, but not shared-resource access. If two EDF tasks contend for a shared resource, a task may be released, start executing, and then block on a semaphore. That creates extra delay, makes timing analysis harder, and can break schedulability.
+- `configSRP_RESOURCE_TYPE_COUNT`: number of resource IDs in the SRP claim universe.
+- `configUSE_SRP_RESOURCE_RELEASE_HOOK`: optional application release callback.
+- `configSRP_SHARED_STACK_SIZE`: size of SRP shared stack pool in `StackType_t` words.
+- `configSRP_SHARED_STACK_MAX_LEVELS`: maximum number of unique SRP preemption levels tracked for shared-stack regions.
 
-The goal of SRP in this project is to:
+## 2. SRP Task Metadata
 
-- restrict resource access to binary semaphores,
-- prevent a task from starting unless it is safe to do so under the current system ceiling,
-- keep blocking predictable,
-- support EDF + SRP admission control later,
-- eventually enable run-time stack sharing among tasks with the same preemption level.
+When EDF+SRP is enabled, each task TCB stores:
 
-FreeRTOS already uses priority inheritance for mutexes. This SRP work does not replace that mechanism globally. Instead, it adds a new EDF+SRP path for binary semaphores.
+- `uxPriorityCeiling`: task preemption level (derived from relative deadline).
+- `uxStackDepthWords`: requested task stack depth in words (used for shared-stack sizing and reporting).
+- `xSRPTaskListItem`: registry/list node for SRP task tracking.
+- `uxSRPResourceClaimMax[]`: binary claim map per resource type.
+- `uxSRPResourceHeldCount[]`: binary held map per resource type.
 
-## 2. High-Level Structure
+Global SRP state includes:
 
-At a high level, the current design works like this:
+- `xReadySRPTasksList`: SRP ready list sorted by absolute deadline.
+- `xSRPTaskRegistryList`: registry of SRP tasks.
+- `uxSRPResourceBlockingCeilingTable[]`: per-resource computed static ceiling.
+- `uxSRPResourceActiveCount[]`: lock-state table (0/1 in binary use).
+- `uxSystemCeiling`: current system ceiling from active resources.
 
-```text
-                          +----------------------+
-                          |  Task creation API   |
-                          |   xTaskCreate(...)   |
-                          +----------+-----------+
-                                     |
-                                     v
-                          +----------------------+
-                          |  EDF task metadata   |
-                          |  period / wcet / D   |
-                          +----------+-----------+
-                                     |
-                                     v
-                          +----------------------+
-                          |  SRP task metadata   |
-                          |  claims / held / PL  |
-                          +----------+-----------+
-                                     |
-                                     v
-                 +---------------------------------------------+
-                 | EDF ordering + SRP eligibility check        |
-                 | earliest deadline task that can legally run |
-                 +---------------------------------------------+
-                                     |
-                                     v
-                      +-------------------------------+
-                      | SRP semaphore wrapper path    |
-                      | take/give + ceiling updates   |
-                      +-------------------------------+
-```
+## 3. Task Creation API (EDF+SRP)
 
-SRP does not replace EDF ordering. EDF still orders ready tasks by absolute deadline. SRP only decides whether a task is eligible to start or continue execution under the current ceiling.
+`xTaskCreate(...)` in EDF+SRP mode accepts:
 
-## 3. Build-Time and API Model
+- `period`, `wcet`, `relative deadline`
+- claimed resource ID array + count
 
-### 3.1 Compile-time configuration
+Validation currently performed:
 
-The main configuration hooks are:
+- EDF parameter validation (`T > 0`, `C > 0`, `D > 0`, `D <= T`)
+- SRP claim validation (ID bounds + duplicate detection)
 
-- `configUSE_EDF`
-- `configUSE_SRP`
-- `configSRP_RESOURCE_TYPE_COUNT`
+### 3.1 Preemption Level
 
-`configSRP_RESOURCE_TYPE_COUNT` defines the compile-time resource ID space. Resource IDs are integers in:
+Task preemption level is derived once at create-time:
 
-```text
-0 .. configSRP_RESOURCE_TYPE_COUNT - 1
-```
+- `preemption_level = portMAX_DELAY - relative_deadline_ticks`
 
-The current implementation does not auto-create semaphores from these IDs. The IDs only define the SRP bookkeeping universe. The application is still responsible for creating the actual binary semaphores and then using the correct `(semaphore handle, resource ID)` pair.
+So shorter relative deadlines map to higher preemption level values.
 
-### 3.2 Task creation API
+## 4. SRP Shared Runtime Stack
 
-In EDF+SRP mode, `xTaskCreate()` takes:
+### 4.1 Buffer and region model
 
-- task code
-- stack depth
-- task parameter
-- task handle output
-- period
-- WCET
-- relative deadline
-- array of claimed semaphore IDs
-- number of claimed semaphores
+A single global shared stack pool is declared:
 
-This means the task statically declares which binary semaphores it may lock.
+- `xSRPSharedStackBuffer[configSRP_SHARED_STACK_SIZE]`
 
-If a task claims no semaphores:
+It is partitioned into contiguous regions, one per unique SRP preemption level.
 
-- `puxClaimedSemaphores = NULL`
-- `uxClaimedSemaphoreCount = 0`
+Each region tracks:
 
-This is the current replacement for the older, more general counted-resource claim model.
+- preemption level
+- region depth (words)
+- base pointer in the shared pool
 
-## 4. Current SRP Data Model
+### 4.2 Region sizing rule
 
-### 4.1 Per-task SRP state
+At SRP task creation, region depth for the task's preemption level is:
 
-Each SRP task currently stores:
+- `max(stackDepth)` across existing tasks in `xSRPTaskRegistryList` with that level
+- compared against the new task's requested depth
 
-- `uxPriorityCeiling`
-- `uxSRPResourceClaimMax[]`
-- `uxSRPResourceHeldCount[]`
-- `xSRPTaskListItem`
+The larger value is used.
 
-What these mean today:
+### 4.3 Region allocation constraints
 
-- `uxPriorityCeiling`
-  This is actually the task's SRP preemption level. It is computed from the relative deadline at task creation. The current name is misleading and should eventually be changed to something like `uxPreemptionLevel`.
+Current implementation intentionally uses fixed layout, no reorganization:
 
-- `uxSRPResourceClaimMax[id]`
-  In the current binary-semaphore design, this is effectively a boolean claim:
-  - `0` means the task does not use resource `id`
-  - `1` means the task may lock resource `id`
+- Regions are appended in preemption-level order.
+- Existing regions can only grow if they are the last region.
+- If a new task would require reordering or middle-region growth, creation fails.
 
-- `uxSRPResourceHeldCount[id]`
-  In the current binary-semaphore design, this is effectively a boolean ownership state:
-  - `0` means the task does not currently hold resource `id`
-  - `1` means the task currently holds resource `id`
+This matches the project assumption that relevant SRP tasks are created before scheduler start and layout is fixed thereafter.
 
-### 4.2 Global SRP state
+### 4.4 Stack pointer assignment path
 
-The kernel currently keeps:
+In EDF+SRP mode, dynamic task creation uses:
 
-- `xReadySRPTasksList`
-- `xSRPTaskRegistryList`
-- `uxSRPResourceBlockingCeilingTable[]`
-- `uxSRPResourceActiveCount[]`
-- `uxSystemCeiling`
+- dynamic TCB allocation
+- shared stack assignment from the SRP region allocator
 
-What these mean today:
+It does **not** use per-task `pvPortMallocStack` for SRP tasks.
 
-- `xReadySRPTasksList`
-  The ready list used in EDF+SRP mode. It is sorted by absolute deadline.
+Non-SRP paths are unchanged:
 
-- `xSRPTaskRegistryList`
-  The list of all SRP tasks currently known to the kernel. It is used when recomputing per-resource ceilings.
+- EDF-only and stock FreeRTOS continue to use existing per-task stack allocation logic.
 
-- `uxSRPResourceBlockingCeilingTable[id]`
-  Despite the name, this now acts as the per-resource ceiling table.
+### 4.5 Deletion and memory ownership
 
-- `uxSRPResourceActiveCount[id]`
-  Despite the name, this now acts like a boolean lock state:
-  - `0` means unlocked
-  - `1` means locked
+SRP shared stack is kernel-owned shared storage, so per-task delete must not free it.
 
-- `uxSystemCeiling`
-  The current system ceiling, computed as the maximum ceiling of the resources that are currently locked.
+SRP-created tasks are tagged as:
 
-## 5. How the Current Implementation Works
+- `tskSTATICALLY_ALLOCATED_STACK_ONLY`
 
-## 5.1 Task creation flow
+Result:
 
-The current SRP task-creation flow is:
+- `prvDeleteTCB()` frees only the TCB for those tasks.
 
-```text
-xTaskCreate(...) in EDF+SRP mode
-    |
-    +--> validate EDF timing parameters
-    |
-    +--> validate claimed semaphore IDs
-    |     - IDs must be in range
-    |     - no duplicates
-    |
-    +--> allocate and initialize TCB
-    |
-    +--> compute SRP preemption level from relative deadline
-    |
-    +--> mark each claimed semaphore ID in uxSRPResourceClaimMax[]
-    |
-    +--> initialize EDF release/deadline metadata
-    |
-    +--> insert task into ready list
-    |
-    +--> insert task into EDF registry
-    |
-    +--> insert task into SRP registry
-    |
-    +--> recompute system ceiling
-```
+## 5. Scheduler/Runtime Behavior with SRP
 
-This is how SRP is currently built directly on top of the EDF task model.
+### 5.1 Ready ordering
 
-### 5.2 Preemption level derivation
+Tasks remain EDF-ordered (by absolute deadline).
 
-The current implementation derives the task's SRP preemption level from the relative deadline:
+### 5.2 Eligibility under ceiling
 
-```text
-shorter relative deadline  -> higher preemption level
-longer relative deadline   -> lower preemption level
-```
-
-This is done once at task creation. It is static. It does not change job-by-job with absolute deadlines.
-
-That is the correct general idea for SRP on top of EDF.
-
-### 5.3 Ready-list and scheduling flow
-
-EDF+SRP scheduling currently works in two layers:
-
-```text
-Layer 1: EDF ordering
-    - ready tasks are kept sorted by absolute deadline
-
-Layer 2: SRP eligibility
-    - scan the ready list from earliest deadline to latest
-    - choose the first task that:
-        a) has preemption level > current system ceiling
-        or
-        b) already holds a resource and must be allowed to continue
-```
-
-That gives the following runtime picture:
-
-```text
-xReadySRPTasksList (sorted by abs deadline)
-
-    head --> T1 --> T2 --> T3 --> ...
-              |      |      |
-              |      |      +-- later deadline
-              |      +--------- later deadline
-              +---------------- earliest deadline
-
-prvSRPSelectReadyTask()
-    |
-    +--> scan from head
-    +--> pick first SRP-eligible task
-```
-
-This preserves EDF ordering while letting SRP control when a task is allowed to run.
-
-### 5.4 Resource-ceiling and system-ceiling flow
-
-The current implementation now computes the ceiling table as follows:
-
-```text
-for each resource id r:
-    resource_ceiling[r] =
-        max preemption level among tasks that claim r
-
-system_ceiling =
-    max resource_ceiling[r] over all resources currently locked
-```
-
-That gives the intended binary-semaphore SRP model:
+SRP selection scans ready tasks in EDF order and picks first eligible task:
 
-```text
-Task claims:
-    Task A claims S0
-    Task B claims S0, S1
-    Task C claims S1
+- preemption level above current `uxSystemCeiling`, or
+- task already holds a resource (must be allowed to continue)
 
-Resource ceilings:
-    ceiling[S0] = max( PL(A), PL(B) )
-    ceiling[S1] = max( PL(B), PL(C) )
+### 5.3 Ceiling computation
 
-Runtime:
-    if S1 is locked:
-        system_ceiling = ceiling[S1]
-```
+For each resource ID:
 
-The current implementation recomputes this by scanning the SRP task registry whenever resource state changes. It does not use a stack of ceilings yet.
+- static ceiling = max preemption level among tasks that claim it
 
-### 5.5 Resource acquisition path
+System ceiling:
 
-The current take path is:
+- max static ceiling among currently active resources
 
-```text
-xSemaphoreTakeSRP(...)
-    |
-    +--> xQueueSemaphoreTakeSRP(...)
-            |
-            +--> validate:
-            |      - non-blocking take only
-            |      - uxCount == 1
-            |      - queue is a semaphore (item size 0)
-            |      - length == 1
-            |      - not a mutex
-            |
-            +--> xTaskSRPAcquireResource(resource_id, 1)
-            |      - task must have claimed the resource
-            |      - task must not already hold it
-            |      - resource must be unlocked
-            |      - task must be above system ceiling
-            |        or already be continuing with a held resource
-            |      - mark resource locked
-            |      - mark task as holding it
-            |      - recompute system ceiling
-            |
-            +--> xQueueSemaphoreTake(..., 0)
-            |
-            +--> if queue take fails:
-                   rollback SRP release
-```
+### 5.4 Resource acquisition and release
 
-This is how SRP bookkeeping is tied to semaphore acquisition without rewriting the whole semaphore subsystem.
+Acquisition path checks:
 
-### 5.6 Resource release path
+- binary-only assumptions (`uxCount == 1`, valid resource ID)
+- task claimed resource
+- task not already holding resource
+- resource currently unlocked
+- ceiling eligibility
 
-The current give path is:
+On success:
 
-```text
-xSemaphoreGiveSRP(...)
-    |
-    +--> xQueueSemaphoreGiveSRP(...)
-            |
-            +--> validate binary semaphore assumptions
-            |
-            +--> ensure semaphore is currently taken
-            |
-            +--> xTaskSRPReleaseResource(resource_id, 1)
-            |      - current task must hold the resource
-            |      - resource must be locked
-            |      - clear task-held state
-            |      - clear global locked state
-            |      - recompute system ceiling
-            |
-            +--> xQueueGenericSend(..., 0)
-```
+- mark resource active
+- mark task holding
+- recompute system ceiling
 
-This sequencing is safer than the earlier version that gave the semaphore first and only then updated SRP state.
+Release path checks ownership and active state, then clears both and recomputes system ceiling.
 
-### 5.7 Normal periodic completion
+### 5.5 Cleanup safety
 
-EDF tasks already used `xTaskDelayUntil()` to:
+When tasks are deleted, SRP-held resources are force-released to prevent stale resource state.
 
-- advance the next release time,
-- advance the next absolute deadline,
-- reinsert the task into the periodic registry.
+## 6. Quantitative Stack Tracking API
 
-The SRP path now reuses that same EDF periodic helper and updates both:
+A utility API is provided:
 
-- the EDF registry item
-- the SRP registry item
+- `vTaskGetSRPSharedStackUsage(size_t *sharedBytes, size_t *perTaskBytes)`
 
-This matters because SRP tasks are built on EDF periodic tasks, so they must continue to participate in the same job-release/deadline lifecycle.
+It reports:
 
-### 5.8 Forced cleanup paths
+- `sharedBytes`: bytes reserved by current SRP preemption-level regions
+- `perTaskBytes`: bytes that would be used if each SRP task had its own private stack (sum of requested SRP task depths)
 
-The implementation already contains useful safety logic that should be kept:
+## 7. Intentional Guardrails
 
-- if a task is deleted, its SRP-held resources are force-released
-- if a job is dropped/stopped on the EDF side, SRP-held resources are also force-released
+The implementation currently enforces:
 
-This keeps global resource state from being permanently corrupted by a task that disappears while holding a resource.
+- SRP shared stack create-time path rejects task creation once scheduler is running.
+- Shared-stack support requires mixed static/dynamic allocation bookkeeping support (`tskSTATIC_AND_DYNAMIC_ALLOCATION_POSSIBLE != 0`).
 
-## 6. Why This Design Is "Built on EDF"
+## 8. Current Known Gaps
 
-The SRP implementation does not create a second independent scheduler. It reuses EDF in the following way:
+The following are still pending relative to full Task 2 expectations:
 
-```text
-EDF provides:
-    - periodic task model
-    - absolute deadlines
-    - deadline-sorted ready list
-    - periodic release/deadline advancement
+- Blocking-aware EDF+SRP admission control is not yet integrated into the EDF+SRP `xTaskCreate` branch.
+- A formal ceiling-stack data structure (instead of recompute-on-change) is not implemented.
+- End-to-end SRP stack-sharing quantitative experiments and dedicated SRP test suite documentation still need to be finalized in testing docs.
 
-SRP adds:
-    - static task preemption level
-    - per-resource ceiling
-    - current system ceiling
-    - resource access eligibility rules
-```
+## 9. Removed Legacy/Unused Pieces
 
-So the relationship is:
+The project no longer uses a separate static SRP ceiling table configuration knob.
 
-```text
-EDF answers: "Who is most urgent?"
-SRP answers: "Is that task allowed to start now?"
-```
+- `configSRP_RESOURCE_CEILING_TABLE` has been removed from scheduling config.
 
-That is the core architectural idea of the current implementation.
-
-## 7. Current Limitations
-
-The current implementation is not yet a complete Task 2 solution. The main gaps are below.
-
-### 7.1 Naming is still misleading
-
-Several names still reflect the older design:
-
-- `uxPriorityCeiling` is really a task preemption level
-- `uxSRPResourceBlockingCeilingTable[]` is really a resource ceiling table
-- `uxSRPResourceActiveCount[]` is really a lock-state table
-
-These names do not currently match the binary-semaphore SRP meaning.
-
-### 7.2 No binding between semaphore handle and resource ID
-
-The application must manually pass both:
-
-- the semaphore handle
-- the SRP resource ID
-
-The kernel does not currently prove that the handle and ID correspond to the same logical resource. A caller can still pass the wrong pair.
-
-### 7.3 `uxCount` is still exposed even though the design is binary only
-
-The runtime now enforces `uxCount == 1`, but the public SRP interfaces still expose a count parameter. This is a leftover generalization from counted resources.
-
-### 7.4 `configSRP_RESOURCE_CEILING_TABLE` is unused
-
-The config file still exposes `configSRP_RESOURCE_CEILING_TABLE`, but the kernel computes ceilings from task claims and task preemption levels instead of reading that table.
-
-That means the configuration surface is not fully aligned with the implementation.
-
-### 7.5 `xSrpCeilingTick` appears to be unused
-
-The TCB and `StaticTask_t` still mirror `xSrpCeilingTick`, but the current logic does not meaningfully depend on it.
-
-### 7.6 System ceiling is recomputed by full scan, not maintained by a stack
-
-The assignment hint suggests using a ceiling stack. The current design instead recomputes ceilings by scanning:
-
-- the SRP task registry
-- the current locked-resource state
-
-This can still work functionally, but it is not the stack-based implementation hinted at in the README and it is not optimized.
-
-### 7.7 Blocking-time-aware admission control is missing
-
-Task 2 explicitly requires extending admission control to include blocking times under EDF + SRP.
-
-The current implementation does not yet:
-
-- accept critical-section worst-case lengths as input,
-- compute per-task blocking terms,
-- include those blocking terms in admission control.
-
-### 7.8 Run-time stack sharing is not implemented
-
-Task 2 also explicitly requires stack sharing for tasks with the same preemption level.
-
-The current implementation does not yet:
-
-- group tasks by preemption level for stack reuse,
-- allocate shared run-time stack storage,
-- measure/report the quantitative memory savings.
-
-### 7.9 No dedicated SRP test suite yet
-
-The existing EDF tests are intentionally gated out when SRP is enabled. That is correct, but it means the project still needs:
-
-- dedicated SRP functional tests,
-- SRP + EDF admission tests with blocking,
-- stack-sharing validation tests,
-- the required quantitative study.
-
-## 8. Improvements Needed to Fully Meet the Assignment
-
-The remaining work should be done in roughly this order.
-
-### 8.1 Clean up naming and public surface
-
-- rename `uxPriorityCeiling` to `uxPreemptionLevel`
-- rename `uxSRPResourceBlockingCeilingTable[]` to a resource-ceiling name
-- rename `uxSRPResourceActiveCount[]` to a lock-state name
-- remove `uxCount` from the SRP API, or keep it only as an internal assertion
-- remove or replace `configSRP_RESOURCE_CEILING_TABLE`
-
-### 8.2 Add blocking-time information to task creation
-
-The kernel needs a way to know the worst-case length of each critical section, or at least the maximum blocking contribution of each resource claim. That should become part of the SRP task model so EDF + SRP admission control can be implemented correctly.
-
-### 8.3 Implement EDF + SRP admission control with blocking
-
-The existing EDF admission logic should be extended to account for SRP blocking time. This is still missing.
-
-### 8.4 Decide whether to keep scan-based ceilings or implement a ceiling stack
-
-The current scan-based recomputation is simple and works with the current data structures, but the assignment hint explicitly mentions a stack-based approach. If the goal is to align more closely with the expected SRP structure, this is the next architectural decision to make.
-
-### 8.5 Add stack sharing
-
-This is still the biggest missing Task 2 feature. The implementation needs:
-
-- a way to detect tasks with equal preemption level,
-- a shared run-time stack allocation strategy,
-- proof/tests that such tasks never overlap on the stack,
-- a quantitative comparison versus no stack sharing.
-
-### 8.6 Add SRP tests and documentation artifacts
-
-The project still needs:
-
-- SRP functional tests
-- SRP admission-control tests with blocking
-- stack-sharing tests
-- the required bugs/future/testing writeups specific to SRP
-
-## 9. Current Bottom Line
-
-The SRP implementation has moved from an older counted-resource design toward a binary-semaphore design that is actually layered on EDF:
-
-- SRP is only enabled when EDF is enabled
-- tasks declare claimed semaphore IDs
-- task preemption levels are derived from relative deadlines
-- the ready list remains deadline-ordered
-- the system ceiling is derived from locked resources
-- semaphore access goes through SRP-aware wrappers
-- periodic completion now updates both EDF and SRP registries
-
-So the current implementation captures the basic shape of EDF + SRP.
-
-However, it is still not the full Task 2 solution because the following major requirements remain incomplete:
-
-- blocking-time-aware admission control
-- stack-based ceiling tracking if desired
-- run-time stack sharing
-- SRP-specific testing and quantitative evaluation
-
-That is the current status of SRP in the codebase.
+The previously carried SRP tick metadata field that had no behavioral effect is also removed from TCB/static mirror structures.
