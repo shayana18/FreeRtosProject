@@ -1878,18 +1878,16 @@ BaseType_t xQueueSemaphoreTake( QueueHandle_t xQueue,
 
 BaseType_t xQueueSemaphoreTakeSRP( QueueHandle_t xQueue,
                                    TickType_t xTicksToWait,
-                                   UBaseType_t uxResourceType,
-                                   UBaseType_t uxCount )
+                                   UBaseType_t uxResourceType )
 {
     Queue_t * const pxQueue = xQueue;
     BaseType_t xReturn = errQUEUE_EMPTY;
 
     /* SRP wrappers are non-blocking to keep SRP bookkeeping and lock acquisition
-     * in one deterministic operation. */
+     * in one deterministic operation.  Only binary semaphores are supported. */
     configASSERT( pxQueue != NULL );
 
     if( ( xTicksToWait != ( TickType_t ) 0U ) ||
-        ( uxCount != 1U ) ||
         ( pxQueue == NULL ) ||
         ( pxQueue->uxItemSize != queueSEMAPHORE_QUEUE_ITEM_LENGTH ) ||
         ( pxQueue->uxLength != ( UBaseType_t ) 1U ) ||
@@ -1900,7 +1898,7 @@ BaseType_t xQueueSemaphoreTakeSRP( QueueHandle_t xQueue,
 
     vTaskSuspendAll();
     {
-        if( xTaskSRPAcquireResource( uxResourceType, uxCount ) == pdPASS )
+        if( xTaskSRPAcquireResource( uxResourceType ) == pdPASS )
         {
             if( xQueueSemaphoreTake( pxQueue, ( TickType_t ) 0U ) == pdPASS )
             {
@@ -1908,7 +1906,7 @@ BaseType_t xQueueSemaphoreTakeSRP( QueueHandle_t xQueue,
             }
             else
             {
-                ( void ) xTaskSRPReleaseResource( uxResourceType, uxCount );
+                ( void ) xTaskSRPReleaseResource( uxResourceType );
             }
         }
     }
@@ -1920,16 +1918,14 @@ BaseType_t xQueueSemaphoreTakeSRP( QueueHandle_t xQueue,
 /*-----------------------------------------------------------*/
 
 BaseType_t xQueueSemaphoreGiveSRP( QueueHandle_t xQueue,
-                                   UBaseType_t uxResourceType,
-                                   UBaseType_t uxCount )
+                                   UBaseType_t uxResourceType )
 {
     Queue_t * const pxQueue = xQueue;
     BaseType_t xReturn = errQUEUE_FULL;
 
     configASSERT( pxQueue != NULL );
 
-    if( ( uxCount != 1U ) ||
-        ( pxQueue == NULL ) ||
+    if( ( pxQueue == NULL ) ||
         ( pxQueue->uxItemSize != queueSEMAPHORE_QUEUE_ITEM_LENGTH ) ||
         ( pxQueue->uxLength != ( UBaseType_t ) 1U ) ||
         ( pxQueue->uxQueueType == queueQUEUE_IS_MUTEX ) )
@@ -1941,7 +1937,7 @@ BaseType_t xQueueSemaphoreGiveSRP( QueueHandle_t xQueue,
     {
         if( pxQueue->uxMessagesWaiting == ( UBaseType_t ) 0U )
         {
-            xReturn = xTaskSRPReleaseResource( uxResourceType, uxCount );
+            xReturn = xTaskSRPReleaseResource( uxResourceType );
 
             if( xReturn == pdPASS )
             {

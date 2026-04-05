@@ -298,8 +298,8 @@ typedef QueueHandle_t SemaphoreHandle_t;
 #define xSemaphoreTake( xSemaphore, xBlockTime )    xQueueSemaphoreTake( ( xSemaphore ), ( xBlockTime ) )
 
 #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
-    #define xSemaphoreTakeSRP( xSemaphore, xBlockTime, uxResourceType, uxCount ) \
-        xQueueSemaphoreTakeSRP( ( QueueHandle_t ) ( xSemaphore ), ( xBlockTime ), ( uxResourceType ), ( uxCount ) )
+    #define xSemaphoreTakeSRP( xSemaphore, xBlockTime, uxResourceType ) \
+        xQueueSemaphoreTakeSRP( ( QueueHandle_t ) ( xSemaphore ), ( xBlockTime ), ( uxResourceType ) )
 #endif
 
 /**
@@ -465,8 +465,8 @@ typedef QueueHandle_t SemaphoreHandle_t;
 #define xSemaphoreGive( xSemaphore )    xQueueGenericSend( ( QueueHandle_t ) ( xSemaphore ), NULL, semGIVE_BLOCK_TIME, queueSEND_TO_BACK )
 
 #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
-    #define xSemaphoreGiveSRP( xSemaphore, uxResourceType, uxCount ) \
-        xQueueSemaphoreGiveSRP( ( QueueHandle_t ) ( xSemaphore ), ( uxResourceType ), ( uxCount ) )
+    #define xSemaphoreGiveSRP( xSemaphore, uxResourceType ) \
+        xQueueSemaphoreGiveSRP( ( QueueHandle_t ) ( xSemaphore ), ( uxResourceType ) )
 #endif
 
 /**

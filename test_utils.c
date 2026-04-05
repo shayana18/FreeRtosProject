@@ -1,7 +1,5 @@
 #include "test_utils.h"
 
-#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 0 ) )
-
 #include "pico/stdlib.h"
 
 void spin_ms(uint32_t target_ms)
@@ -22,5 +20,3 @@ void spin_ms(uint32_t target_ms)
         prev_us = now_us;
     }
 }
-
-#endif /* configUSE_EDF */

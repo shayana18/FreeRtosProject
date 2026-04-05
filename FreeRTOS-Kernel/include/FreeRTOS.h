@@ -3208,6 +3208,7 @@ typedef struct xSTATIC_TCB
             StaticListItem_t xSRPTaskListItem;   /**< Mirrors TCB_t::xSRPTaskListItem for static allocation size compatibility. */
             #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
                 UBaseType_t uxSRPResourceClaimMax[ configSRP_RESOURCE_TYPE_COUNT ];
+                TickType_t xSRPResourceMaxCriticalSectionTicks[ configSRP_RESOURCE_TYPE_COUNT ];
                 UBaseType_t uxSRPResourceHeldCount[ configSRP_RESOURCE_TYPE_COUNT ];
             #endif
         #endif

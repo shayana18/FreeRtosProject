@@ -26,11 +26,17 @@ void vTraceClearTaskSwitchSignal( void );
 void vTraceSignalDeadlineMiss( void );
 void vTraceClearDeadlineMissSignal( void );
 void vTraceDeadlineMissTick( void );
+void vApplicationDeadlineMissHook( void );
 
 #define traceTASK_SWITCHED_IN()    vTraceTaskSwitchedIn( ( uint32_t ) ( uintptr_t ) pxCurrentTCB->pxTaskTag )
 
 #define traceTASK_SWITCHED_OUT()    vTraceClearTaskSwitchSignal()
-#define traceTASK_DEADLINE_MISSED()    vTraceSignalDeadlineMiss()
+#define traceTASK_DEADLINE_MISSED()            \
+    do                                         \
+    {                                          \
+        vTraceSignalDeadlineMiss();            \
+        vApplicationDeadlineMissHook();        \
+    } while( 0 )
 #define traceTASK_INCREMENT_TICK( xTickCount )    vTraceDeadlineMissTick()
 
 #ifdef __cplusplus
