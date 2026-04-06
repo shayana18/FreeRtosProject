@@ -8082,10 +8082,6 @@ static void prvInitialiseTaskLists( void )
         {
             vListInitialise( &xReadySRPTasksList );
             vListInitialise( &xSRPTaskRegistryList );
-            #if ( configUSE_SRP_SHARED_STACKS == 1 )
-                uxSRPSharedStackRegionCount = 0U;
-                uxSRPSharedStackUsedDepthWords = ( configSTACK_DEPTH_TYPE ) 0U;
-            #endif
         }
         #endif
     #endif
@@ -10847,6 +10843,13 @@ void vTaskResetState( void )
     #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
     {
         uxSystemCeiling = ( UBaseType_t ) 0U;
+
+        #if ( configUSE_SRP_SHARED_STACKS == 1 )
+        {
+            uxSRPSharedStackRegionCount = 0U;
+            uxSRPSharedStackUsedDepthWords = ( configSTACK_DEPTH_TYPE ) 0U;
+        }
+        #endif
 
         #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
         {
