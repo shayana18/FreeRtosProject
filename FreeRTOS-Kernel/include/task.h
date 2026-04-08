@@ -92,6 +92,12 @@ struct tskTaskControlBlock; /* The old naming convention is used to prevent brea
 typedef struct tskTaskControlBlock         * TaskHandle_t;
 typedef const struct tskTaskControlBlock   * ConstTaskHandle_t;
 
+/* Application-provided SRP claim descriptor used at task creation time. */
+typedef struct xSRPResourceClaim
+{
+    UBaseType_t uxResourceType;
+    TickType_t xMaxCriticalSectionTicks;
+} SRPResourceClaim_t;
 /*
  * Defines the prototype to which the application task hook function must
  * conform.
@@ -177,6 +183,32 @@ typedef struct xTASK_STATUS
     #endif
 } TaskStatus_t;
 
+/* Best-effort debug snapshot intended for fault handlers and debugger inspection. */
+typedef struct xTASK_DEBUG_SNAPSHOT
+{
+    TaskHandle_t xHandle;
+    const char * pcTaskName;
+    volatile StackType_t * pxTopOfStack;
+    StackType_t * pxStackBase;
+    StackType_t * pxStackHighAddress;
+    const void * pvStateListContainer;
+    UBaseType_t uxCurrentPriority;
+    UBaseType_t uxSchedulerSuspended;
+    TickType_t xTickCount;
+    #if ( configUSE_EDF == 1 )
+        TickType_t xAbsJobReleaseTime;
+        TickType_t xPeriodTicks;
+        TickType_t xWcetTicks;
+        TickType_t xJobExecTicks;
+        TickType_t xRelDeadline;
+        TickType_t xAbsDeadline;
+    #endif
+    #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+        UBaseType_t uxPriorityCeiling;
+        configSTACK_DEPTH_TYPE uxStackDepthWords;
+    #endif
+} TaskDebugSnapshot_t;
+
 /* Possible return values for eTaskConfirmSleepModeStatus(). */
 typedef enum
 {
@@ -187,6 +219,24 @@ typedef enum
         eNoTasksWaitingTimeout /* No tasks are waiting for a timeout so it is safe to enter a sleep mode that can only be exited by an external interrupt. */
     #endif /* INCLUDE_vTaskSuspend */
 } eSleepModeStatus;
+
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+
+    #if ( configUSE_SRP_RESOURCE_RELEASE_HOOK == 1 )
+        /* Optional application callback invoked after an SRP binary semaphore is released.
+         * xForcedRelease is pdTRUE for task-delete cleanup, pdFALSE for explicit release.
+         * The callback must be bounded and must not block. */
+        void vApplicationSRPResourceReleaseHook( TaskHandle_t xTask,
+                                                 UBaseType_t uxResourceType,
+                                                 BaseType_t xForcedRelease );
+    #endif
+
+    /* Reports SRP shared-stack usage in bytes.
+     * puxSharedBytes receives the bytes reserved in the shared stack pool.
+     * puxPerTaskBytes receives the bytes that per-task allocation would use. */
+    void vTaskGetSRPSharedStackUsage( size_t * puxSharedBytes,
+                                      size_t * puxPerTaskBytes );
+#endif
 
 /**
  * Defines the priority used by the idle task.  This must not be modified.
@@ -379,12 +429,41 @@ typedef enum
  * \ingroup Tasks
  */
 #if ( configSUPPORT_DYNAMIC_ALLOCATION == 1 )
-    BaseType_t xTaskCreate( TaskFunction_t pxTaskCode,
-                            const char * const pcName,
-                            const configSTACK_DEPTH_TYPE uxStackDepth,
-                            void * const pvParameters,
-                            UBaseType_t uxPriority,
-                            TaskHandle_t * const pxCreatedTask ) PRIVILEGED_FUNCTION;
+    #if ( configUSE_EDF == 1 )
+        #if ( configUSE_SRP == 1 ) /* SRP tasks as SRP can only work on top of EDF. */
+            BaseType_t xTaskCreate( TaskFunction_t pxTaskCode,
+                                    const char * const pcName,
+                                    const configSTACK_DEPTH_TYPE uxStackDepth,
+                                    void * const pvParameters,
+                                    TaskHandle_t * const pxCreatedTask,
+                                    uint32_t ulPeriodMs,
+                                    uint32_t ulWcetMs,
+                                    uint32_t ulRelDeadlineMs,
+                                    const SRPResourceClaim_t * const pxResourceClaims,
+                                    UBaseType_t uxClaimedSemaphoreCount ) PRIVILEGED_FUNCTION;
+        #else // EDF tasks (no SRP)
+            BaseType_t xTaskCreate( TaskFunction_t pxTaskCode,
+                                    const char * const pcName,
+                                    const configSTACK_DEPTH_TYPE uxStackDepth,
+                                    void * const pvParameters,
+                                    TaskHandle_t * const pxCreatedTask,
+                                    uint32_t ulPeriodMs,
+                                    uint32_t ulWcetMs,
+                                    uint32_t ulRelDeadlineMs ) PRIVILEGED_FUNCTION;
+        #endif
+    #else // falling back to fixed priority
+        BaseType_t xTaskCreate( TaskFunction_t pxTaskCode,
+                                const char * const pcName,
+                                const configSTACK_DEPTH_TYPE uxStackDepth,
+                                void * const pvParameters,
+                                UBaseType_t uxPriority,
+                                TaskHandle_t * const pxCreatedTask ) PRIVILEGED_FUNCTION;
+    #endif
+#endif
+
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+    BaseType_t xTaskSRPAcquireResource( UBaseType_t uxResourceType ) PRIVILEGED_FUNCTION;
+    BaseType_t xTaskSRPReleaseResource( UBaseType_t uxResourceType ) PRIVILEGED_FUNCTION;
 #endif
 
 #if ( ( configSUPPORT_DYNAMIC_ALLOCATION == 1 ) && ( configNUMBER_OF_CORES > 1 ) && ( configUSE_CORE_AFFINITY == 1 ) )
@@ -3590,6 +3669,8 @@ TaskHandle_t xTaskGetCurrentTaskHandle( void ) PRIVILEGED_FUNCTION;
  * Return the handle of the task running on specified core.
  */
 TaskHandle_t xTaskGetCurrentTaskHandleForCore( BaseType_t xCoreID ) PRIVILEGED_FUNCTION;
+
+void vTaskGetCurrentDebugSnapshot( TaskDebugSnapshot_t * pxSnapshot ) PRIVILEGED_FUNCTION;
 
 /*
  * Shortcut used by the queue implementation to prevent unnecessary call to

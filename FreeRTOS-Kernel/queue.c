@@ -1874,6 +1874,89 @@ BaseType_t xQueueSemaphoreTake( QueueHandle_t xQueue,
 }
 /*-----------------------------------------------------------*/
 
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+
+BaseType_t xQueueSemaphoreTakeSRP( QueueHandle_t xQueue,
+                                   TickType_t xTicksToWait,
+                                   UBaseType_t uxResourceType )
+{
+    Queue_t * const pxQueue = xQueue;
+    BaseType_t xReturn = errQUEUE_EMPTY;
+
+    /* SRP wrappers are non-blocking to keep SRP bookkeeping and lock acquisition
+     * in one deterministic operation.  Only binary semaphores are supported. */
+    configASSERT( pxQueue != NULL );
+
+    if( ( xTicksToWait != ( TickType_t ) 0U ) ||
+        ( pxQueue == NULL ) ||
+        ( pxQueue->uxItemSize != queueSEMAPHORE_QUEUE_ITEM_LENGTH ) ||
+        ( pxQueue->uxLength != ( UBaseType_t ) 1U ) ||
+        ( pxQueue->uxQueueType == queueQUEUE_IS_MUTEX ) )
+    {
+        return errQUEUE_EMPTY;
+    }
+
+    vTaskSuspendAll();
+    {
+        if( xTaskSRPAcquireResource( uxResourceType ) == pdPASS )
+        {
+            if( xQueueSemaphoreTake( pxQueue, ( TickType_t ) 0U ) == pdPASS )
+            {
+                xReturn = pdPASS;
+            }
+            else
+            {
+                ( void ) xTaskSRPReleaseResource( uxResourceType );
+            }
+        }
+    }
+    ( void ) xTaskResumeAll();
+
+    return xReturn;
+}
+
+/*-----------------------------------------------------------*/
+
+BaseType_t xQueueSemaphoreGiveSRP( QueueHandle_t xQueue,
+                                   UBaseType_t uxResourceType )
+{
+    Queue_t * const pxQueue = xQueue;
+    BaseType_t xReturn = errQUEUE_FULL;
+
+    configASSERT( pxQueue != NULL );
+
+    if( ( pxQueue == NULL ) ||
+        ( pxQueue->uxItemSize != queueSEMAPHORE_QUEUE_ITEM_LENGTH ) ||
+        ( pxQueue->uxLength != ( UBaseType_t ) 1U ) ||
+        ( pxQueue->uxQueueType == queueQUEUE_IS_MUTEX ) )
+    {
+        return errQUEUE_FULL;
+    }
+
+    vTaskSuspendAll();
+    {
+        if( pxQueue->uxMessagesWaiting == ( UBaseType_t ) 0U )
+        {
+            xReturn = xTaskSRPReleaseResource( uxResourceType );
+
+            if( xReturn == pdPASS )
+            {
+                xReturn = xQueueGenericSend( pxQueue,
+                                             NULL,
+                                             ( TickType_t ) 0U,
+                                             queueSEND_TO_BACK );
+                configASSERT( xReturn == pdPASS );
+            }
+        }
+    }
+    ( void ) xTaskResumeAll();
+
+    return xReturn;
+}
+
+#endif /* ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) */
+/*-----------------------------------------------------------*/
+
 BaseType_t xQueuePeek( QueueHandle_t xQueue,
                        void * const pvBuffer,
                        TickType_t xTicksToWait )

@@ -3194,6 +3194,26 @@ typedef struct xSTATIC_TCB
     #if ( configUSE_POSIX_ERRNO == 1 )
         int iDummy22;
     #endif
+    #if ( configUSE_EDF == 1 )
+        TickType_t xAbsJobReleaseTime;       /**< Absolute release time of current job. */
+        TickType_t xPeriodTicks;             /**< Task period in ticks. */
+        TickType_t xWcetTicks;               /**< WCET budget in ticks. */
+        TickType_t xJobExecTicks;            /**< Number of ticks spent on current job. */
+        TickType_t xRelDeadline;             /**< Relative deadline in ticks. */
+        TickType_t xAbsDeadline;             /**< Absolute deadline in ticks. */
+        StaticListItem_t xEDFTaskListItem;   /**< Mirrors TCB_t::xEDFTaskListItem for static allocation size compatibility. */
+        #if ( configUSE_SRP == 1 )
+            UBaseType_t uxPriorityCeiling;       /**< Mirrors TCB_t::uxPriorityCeiling for static allocation size compatibility. */
+            configSTACK_DEPTH_TYPE uxStackDepthWords; /**< Mirrors TCB_t::uxStackDepthWords for static allocation size compatibility. */
+            StaticListItem_t xSRPTaskListItem;   /**< Mirrors TCB_t::xSRPTaskListItem for static allocation size compatibility. */
+            #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
+                UBaseType_t uxSRPResourceClaimMax[ configSRP_RESOURCE_TYPE_COUNT ];
+                TickType_t xSRPResourceMaxCriticalSectionTicks[ configSRP_RESOURCE_TYPE_COUNT ];
+                UBaseType_t uxSRPResourceHeldCount[ configSRP_RESOURCE_TYPE_COUNT ];
+            #endif
+        #endif
+    #endif
+    
 } StaticTask_t;
 
 /*
