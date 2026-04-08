@@ -1785,6 +1785,14 @@ void vQueueWaitForMessageRestricted( QueueHandle_t xQueue,
 BaseType_t xQueueGenericReset( QueueHandle_t xQueue,
                                BaseType_t xNewQueue ) PRIVILEGED_FUNCTION;
 
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+    BaseType_t xQueueSemaphoreTakeSRP( QueueHandle_t xQueue,
+                                       TickType_t xTicksToWait,
+                                       UBaseType_t uxResourceType ) PRIVILEGED_FUNCTION;
+    BaseType_t xQueueSemaphoreGiveSRP( QueueHandle_t xQueue,
+                                       UBaseType_t uxResourceType ) PRIVILEGED_FUNCTION;
+#endif
+
 #if ( configUSE_TRACE_FACILITY == 1 )
     void vQueueSetQueueNumber( QueueHandle_t xQueue,
                                UBaseType_t uxQueueNumber ) PRIVILEGED_FUNCTION;

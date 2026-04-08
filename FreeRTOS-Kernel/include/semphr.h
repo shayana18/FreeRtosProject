@@ -297,6 +297,11 @@ typedef QueueHandle_t SemaphoreHandle_t;
  */
 #define xSemaphoreTake( xSemaphore, xBlockTime )    xQueueSemaphoreTake( ( xSemaphore ), ( xBlockTime ) )
 
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+    #define xSemaphoreTakeSRP( xSemaphore, xBlockTime, uxResourceType ) \
+        xQueueSemaphoreTakeSRP( ( QueueHandle_t ) ( xSemaphore ), ( xBlockTime ), ( uxResourceType ) )
+#endif
+
 /**
  * semphr. h
  * @code{c}
@@ -458,6 +463,11 @@ typedef QueueHandle_t SemaphoreHandle_t;
  * \ingroup Semaphores
  */
 #define xSemaphoreGive( xSemaphore )    xQueueGenericSend( ( QueueHandle_t ) ( xSemaphore ), NULL, semGIVE_BLOCK_TIME, queueSEND_TO_BACK )
+
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+    #define xSemaphoreGiveSRP( xSemaphore, uxResourceType ) \
+        xQueueSemaphoreGiveSRP( ( QueueHandle_t ) ( xSemaphore ), ( uxResourceType ) )
+#endif
 
 /**
  * semphr. h

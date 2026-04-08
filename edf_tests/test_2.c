@@ -1,6 +1,6 @@
 #include "edf_tests/test_2.h"
 
-#if ( configUSE_EDF == 1 )
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 0 ) )
 
 #include <stdint.h>
 #include <stdio.h>
@@ -12,7 +12,7 @@
 
 #include "task_trace.h"
 
-#include "edf_tests/test_utils.h"
+#include "test_utils.h"
 
 /* Higher (but < 1.0) total utilization with implicit deadlines (D = T).
  * Harmonic periods make hand-verification easier.
@@ -32,53 +32,89 @@
 
 static void Task1(void *pvParameters)
 {
-    (void) pvParameters;
+    TickType_t xLastWakeTime;
+    BaseType_t xDelayResult;
 
-    vTaskSetApplicationTaskTag(NULL, (TaskHookFunction_t) 1);
+    (void) pvParameters;
+    xLastWakeTime = xTaskGetTickCount();
 
     for (;;)
     {
         spin_ms(T1_WCET_MS);
+
+        xDelayResult = xTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(T1_PERIOD_MS));
+
+        if( xDelayResult == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
     }
 }
 
 static void Task2(void *pvParameters)
 {
-    (void) pvParameters;
+    TickType_t xLastWakeTime;
+    BaseType_t xDelayResult;
 
-    vTaskSetApplicationTaskTag(NULL, (TaskHookFunction_t) 2);
+    (void) pvParameters;
+    xLastWakeTime = xTaskGetTickCount();
 
     for (;;)
     {
         spin_ms(T2_WCET_MS);
+
+        xDelayResult = xTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(T2_PERIOD_MS));
+
+        if( xDelayResult == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
     }
 }
 
 static void Task3(void *pvParameters)
 {
-    (void) pvParameters;
+    TickType_t xLastWakeTime;
+    BaseType_t xDelayResult;
 
-    vTaskSetApplicationTaskTag(NULL, (TaskHookFunction_t) 4);
+    (void) pvParameters;
+    xLastWakeTime = xTaskGetTickCount();
 
     for (;;)
     {
         spin_ms(T3_WCET_MS);
+
+        xDelayResult = xTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(T3_PERIOD_MS));
+
+        if( xDelayResult == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
     }
 }
 
 static void Task4(void *pvParameters)
 {
-    (void) pvParameters;
+    TickType_t xLastWakeTime;
+    BaseType_t xDelayResult;
 
-    vTaskSetApplicationTaskTag(NULL, (TaskHookFunction_t) 8);
+    (void) pvParameters;
+    xLastWakeTime = xTaskGetTickCount();
 
     for (;;)
     {
         spin_ms(T4_WCET_MS);
+
+        xDelayResult = xTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(T4_PERIOD_MS));
+
+        if( xDelayResult == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
     }
 }
 
-void test_2_run(void)
+void edf_2_run(void)
 {
     stdio_init_all();
     vTraceTaskPinsInit();

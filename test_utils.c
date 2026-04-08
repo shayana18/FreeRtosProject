@@ -1,6 +1,4 @@
-#include "edf_tests/test_utils.h"
-
-#if ( configUSE_EDF == 1 )
+#include "test_utils.h"
 
 #include "pico/stdlib.h"
 
@@ -22,5 +20,3 @@ void spin_ms(uint32_t target_ms)
         prev_us = now_us;
     }
 }
-
-#endif /* configUSE_EDF */

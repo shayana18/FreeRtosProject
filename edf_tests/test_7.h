@@ -2,7 +2,7 @@
 
 #include "schedulingConfig.h"
 
-#if ( configUSE_EDF == 1 )
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 0 ) )
 /**
  * Run EDF test case 7 (implicit deadlines + admission control):
  * - Start with a schedulable baseline set where all tasks have D = T.
@@ -11,7 +11,7 @@
  *
  * Intended usage: call once from main(). This function does not return.
  */
-void test_7_run(void);
+void edf_7_run(void);
 #else
-static inline void test_7_run(void) {}
+static inline void edf_7_run(void) {}
 #endif

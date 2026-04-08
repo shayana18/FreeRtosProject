@@ -2,7 +2,7 @@
 
 #include "schedulingConfig.h"
 
-#if ( configUSE_EDF == 1 )
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 0 ) )
 /**
  * Run EDF test case 3 (admission control):
  * - Attempt to add an unschedulable task (U_total would exceed 1).
@@ -11,7 +11,7 @@
  *
  * Intended usage: call once from main(). This function does not return.
  */
-void test_3_run(void);
+void edf_3_run(void);
 #else
-static inline void test_3_run(void) {}
+static inline void edf_3_run(void) {}
 #endif
