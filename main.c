@@ -84,7 +84,7 @@ int main( void )
         // Seven tasks with binary-encoded trace IDs and two intentional single deadline-miss events.
         // edf_8_run();
         #else
-            srp_1_run();
+            // srp_1_run();
             // srp_2_run();
             // srp_3_run();
             // srp_4_run();
