@@ -1,7 +1,7 @@
 
 // Configure what scheduling algorithm is to be used. If all 0 then use default FreeRTOS scheduling
-#define configUSE_EDF 0
-#define configUSE_SRP 0
+#define configUSE_EDF 1
+#define configUSE_SRP 1
 #define configUSE_CBS 0
 
 #if ( configUSE_SRP == 1 ) && ( configUSE_EDF != 1 )
@@ -10,7 +10,30 @@
 
 #if (configUSE_CBS == 1) && ( configUSE_EDF != 1)
 	#error "configUSE_CBS can only be enabled when configUSE_EDF == 1"
-#endif 
+#endif
+
+
+/* CBS (Constant Bandwidth Server) global configuration.
+ * Only relevant when configUSE_CBS == 1. */
+#if ( configUSE_CBS == 1 )
+
+	/* Maximum number of concurrent CBS servers. */
+	#ifndef configCBS_MAX_SERVERS
+		#define configCBS_MAX_SERVERS 4U
+	#endif
+
+	/* Maximum number of pending aperiodic jobs across all CBS servers. */
+	#ifndef configCBS_MAX_PENDING_JOBS
+		#define configCBS_MAX_PENDING_JOBS 32U
+	#endif
+
+	/* Allow budget carryover from one period to the next (0 = no, 1 = yes).
+	 * For simplicity, default is no carryover. */
+	#ifndef configCBS_ALLOW_BUDGET_CARRYOVER
+		#define configCBS_ALLOW_BUDGET_CARRYOVER 0
+	#endif
+
+#endif /* #if ( configUSE_CBS == 1 ) */ 
 
 
 /* SRP global resource configuration.

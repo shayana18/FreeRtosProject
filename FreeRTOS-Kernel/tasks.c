@@ -426,6 +426,10 @@ typedef struct tskTaskControlBlock       /* The old naming convention is used to
             UBaseType_t uxSRPResourceHeldCount[ configSRP_RESOURCE_TYPE_COUNT ]; /**< Runtime held count per resource type for this task. */
         #endif
     #endif
+    #if ( ( configUSE_EDF == 1 ) && ( configUSE_CBS == 1 ) )
+        void * pxCBSServer;                  /**< Pointer to CBS_Server_t if task is CBS-managed, NULL otherwise. */
+        UBaseType_t uxCBSJobID;              /**< Sequential job ID for CBS jobs submitted by this task. */
+    #endif
     #if ( configNUMBER_OF_CORES > 1 )
         volatile BaseType_t xTaskRunState;      /**< Used to identify the core the task is running on, if the task is running. Otherwise, identifies the task's state - not running or yielding. */
         UBaseType_t uxTaskAttributes;           /**< Task's attributes - currently used to identify the idle tasks. */

@@ -54,6 +54,7 @@ add_executable(${PROJECT_NAME}
     ${SRP_TEST_SOURCES}
     task_trace.c
     test_utils.c
+    cbs.c
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
