@@ -1,11 +1,15 @@
 
 // Configure what scheduling algorithm is to be used. If all 0 then use default FreeRTOS scheduling
 #define configUSE_EDF 1
-#define configUSE_SRP 1
-#define configUSE_CBS 0
+#define configUSE_SRP 0
+#define configUSE_CBS 1
 
 #if ( configUSE_SRP == 1 ) && ( configUSE_EDF != 1 )
     #error "configUSE_SRP can only be enabled when configUSE_EDF == 1"
+#endif
+
+#if ( configUSE_CBS == 1 ) && ( configUSE_SRP == 1 )
+	#error "configUSE_CBS and configUSE_SRP cannot both be enabled"
 #endif
 
 #if (configUSE_CBS == 1) && ( configUSE_EDF != 1)

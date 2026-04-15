@@ -466,6 +466,16 @@ typedef enum
     BaseType_t xTaskSRPReleaseResource( UBaseType_t uxResourceType ) PRIVILEGED_FUNCTION;
 #endif
 
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_CBS == 1 ) )
+    typedef struct xCBS_Server CBS_Server_t;
+
+    BaseType_t xTaskCBSBindToServer( TaskHandle_t xTask,
+                                     void * pvCBSServer ) PRIVILEGED_FUNCTION;
+    BaseType_t xTaskCBSUnbindFromServer( TaskHandle_t xTask ) PRIVILEGED_FUNCTION;
+    BaseType_t xTaskCBSIsManaged( TaskHandle_t xTask ) PRIVILEGED_FUNCTION;
+    CBS_Server_t * pxTaskCBSGetServer( TaskHandle_t xTask ) PRIVILEGED_FUNCTION;
+#endif
+
 #if ( ( configSUPPORT_DYNAMIC_ALLOCATION == 1 ) && ( configNUMBER_OF_CORES > 1 ) && ( configUSE_CORE_AFFINITY == 1 ) )
     BaseType_t xTaskCreateAffinitySet( TaskFunction_t pxTaskCode,
                                        const char * const pcName,

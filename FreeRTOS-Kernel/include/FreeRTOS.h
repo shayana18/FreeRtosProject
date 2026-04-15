@@ -3212,6 +3212,10 @@ typedef struct xSTATIC_TCB
                 UBaseType_t uxSRPResourceHeldCount[ configSRP_RESOURCE_TYPE_COUNT ];
             #endif
         #endif
+        #if ( configUSE_CBS == 1 )
+            void * pxCBSServer;                  /**< Mirrors TCB_t::pxCBSServer for static allocation size compatibility. */
+            UBaseType_t uxCBSJobID;              /**< Mirrors TCB_t::uxCBSJobID for static allocation size compatibility. */
+        #endif
     #endif
     
 } StaticTask_t;

@@ -42,6 +42,9 @@
 #include "task.h"
 #include "timers.h"
 #include "stack_macros.h"
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_CBS == 1 ) )
+    #include "cbs.h"
+#endif
 
 /* The default definitions are only available for non-MPU ports. The
  * reason is that the stack alignment requirements vary for different
@@ -666,6 +669,12 @@ PRIVILEGED_DATA static volatile configRUN_TIME_COUNTER_TYPE ulTotalRunTime[ conf
                                                    ListItem_t * pxTaskListItem,
                                                    List_t * pxRegistryList,
                                                 TickType_t xNextReleaseTime ) PRIVILEGED_FUNCTION;
+    #if ( configUSE_CBS == 1 )
+        static BaseType_t prvTaskIsCBSManaged( const TCB_t * pxTCB ) PRIVILEGED_FUNCTION;
+        static BaseType_t prvEDFShouldPreempt( const TCB_t * pxCandidate,
+                                               const TCB_t * pxCurrent ) PRIVILEGED_FUNCTION;
+        static void prvCBSRefreshReadyListPosition( TCB_t * pxTCB ) PRIVILEGED_FUNCTION;
+    #endif
     #if ( configUSE_SRP == 1 )
         #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
             static UBaseType_t uxSRPResourceBlockingCeilingTable[ configSRP_RESOURCE_TYPE_COUNT ];
@@ -3796,7 +3805,11 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
                             pxCurrentTCB = pxNewTCB;
                         }
                     #elif configUSE_EDF == 1
-                        if( pxCurrentTCB->xAbsDeadline > pxNewTCB->xAbsDeadline )
+                        #if ( configUSE_CBS == 1 )
+                            if( prvEDFShouldPreempt( pxNewTCB, pxCurrentTCB ) != pdFALSE )
+                        #else
+                            if( pxCurrentTCB->xAbsDeadline > pxNewTCB->xAbsDeadline )
+                        #endif
                         {
                             pxCurrentTCB = pxNewTCB;
                         }
@@ -5895,7 +5908,11 @@ BaseType_t xTaskResumeAll( void )
                         {
                             /* Trigger a yield when the readied task should run now. */
                             #if ( configUSE_EDF == 1 )
-                                if( pxTCB->xAbsDeadline < pxCurrentTCB->xAbsDeadline )
+                                #if ( configUSE_CBS == 1 )
+                                    if( prvEDFShouldPreempt( pxTCB, pxCurrentTCB ) != pdFALSE )
+                                #else
+                                    if( pxTCB->xAbsDeadline < pxCurrentTCB->xAbsDeadline )
+                                #endif
                             #else
                                 if( pxTCB->uxPriority > pxCurrentTCB->uxPriority )
                             #endif
@@ -6606,13 +6623,15 @@ BaseType_t xTaskIncrementTick( void )
 
                     pxCurrentTCB->xJobExecTicks++;
 
-                    if( prvTickTimeIsAfter( xConstTickCount,
-                                            pxCurrentTCB->xAbsDeadline ) != pdFALSE )
+                    if( ( prvTickTimeIsAfter( xConstTickCount,
+                                              pxCurrentTCB->xAbsDeadline ) != pdFALSE )
+                        )
                     {
                         traceTASK_DEADLINE_MISSED();
                         xStopCurrentJob = pdTRUE;
                     }
-                    else if( pxCurrentTCB->xJobExecTicks >= pxCurrentTCB->xWcetTicks )
+                    else if(
+                             ( pxCurrentTCB->xJobExecTicks >= pxCurrentTCB->xWcetTicks ) )
                     {
                         xStopCurrentJob = pdTRUE;
                     }
@@ -6676,8 +6695,33 @@ BaseType_t xTaskIncrementTick( void )
 
                     pxCurrentTCB->xJobExecTicks++;
 
-                    if( prvTickTimeIsAfter( xConstTickCount,
-                                            pxCurrentTCB->xAbsDeadline ) != pdFALSE )
+                    #if ( configUSE_CBS == 1 )
+                    if( prvTaskIsCBSManaged( pxCurrentTCB ) != pdFALSE )
+                    {
+                        CBS_Server_t * pxServer = ( CBS_Server_t * ) pxCurrentTCB->pxCBSServer;
+
+                        if( ( pxServer != NULL ) && ( pxServer->xRemainingBudget > ( TickType_t ) 0U ) )
+                        {
+                            pxServer->xRemainingBudget--;
+
+                            if( pxServer->xRemainingBudget == ( TickType_t ) 0U )
+                            {
+                                pxServer->xRemainingBudget = pxServer->xCapacityTicks;
+                                pxCurrentTCB->xAbsDeadline = xConstTickCount + pxServer->xPeriodTicks;
+                                pxServer->xAbsDeadline = pxCurrentTCB->xAbsDeadline;
+                                prvCBSRefreshReadyListPosition( pxCurrentTCB );
+                                xSwitchRequired = pdTRUE;
+                            }
+                        }
+                    }
+                    #endif
+
+                    if( ( prvTickTimeIsAfter( xConstTickCount,
+                                              pxCurrentTCB->xAbsDeadline ) != pdFALSE )
+                    #if ( configUSE_CBS == 1 )
+                        && ( prvTaskIsCBSManaged( pxCurrentTCB ) == pdFALSE )
+                    #endif
+                        )
                     {
                         traceTASK_DEADLINE_MISSED();
                         xStopCurrentJob = pdTRUE;
@@ -6783,7 +6827,11 @@ BaseType_t xTaskIncrementTick( void )
                             /* Preemption is on, switch only if the unblocked task
                              * should run ahead of the current task. */
                             #if ( configUSE_EDF == 1 )
-                                if( pxTCB->xAbsDeadline < pxCurrentTCB->xAbsDeadline )
+                                #if ( configUSE_CBS == 1 )
+                                    if( prvEDFShouldPreempt( pxTCB, pxCurrentTCB ) != pdFALSE )
+                                #else
+                                    if( pxTCB->xAbsDeadline < pxCurrentTCB->xAbsDeadline )
+                                #endif
                             #else
                                 if( pxTCB->uxPriority > pxCurrentTCB->uxPriority )
                             #endif
@@ -7145,8 +7193,36 @@ BaseType_t xTaskIncrementTick( void )
                 {
                     if( listLIST_IS_EMPTY( &xReadyEDFTasksList ) == pdFALSE )
                     {
-                        /* EDF ready list is sorted by absolute deadline, so head is next to run. */
+                        /* EDF ready list is sorted by absolute deadline. For equal deadlines,
+                         * pick a CBS-managed task first as required by CBS policy. */
                         TCB_t * pxTCB = ( TCB_t * ) listGET_OWNER_OF_HEAD_ENTRY( &xReadyEDFTasksList );
+
+                        #if ( configUSE_CBS == 1 )
+                        {
+                            const TickType_t xHeadDeadline = pxTCB->xAbsDeadline;
+                            const ListItem_t * pxEndMarker = listGET_END_MARKER( &xReadyEDFTasksList );
+                            const ListItem_t * pxIterator;
+
+                            for( pxIterator = listGET_HEAD_ENTRY( &xReadyEDFTasksList );
+                                 pxIterator != pxEndMarker;
+                                 pxIterator = listGET_NEXT( pxIterator ) )
+                            {
+                                TCB_t * pxCandidate = ( TCB_t * ) listGET_LIST_ITEM_OWNER( pxIterator );
+
+                                if( pxCandidate->xAbsDeadline != xHeadDeadline )
+                                {
+                                    break;
+                                }
+
+                                if( prvTaskIsCBSManaged( pxCandidate ) != pdFALSE )
+                                {
+                                    pxTCB = pxCandidate;
+                                    break;
+                                }
+                            }
+                        }
+                        #endif
+
                         pxCurrentTCB = pxTCB;
                     }
                     else /* If there are no EDF tasks then schedule using fixed priority. */
@@ -8575,6 +8651,63 @@ static void prvResetNextTaskUnblockTime( void )
         vListInsert( pxRegistryList, pxTaskListItem );
     }
 
+    #if ( configUSE_CBS == 1 )
+        static BaseType_t prvTaskIsCBSManaged( const TCB_t * pxTCB )
+        {
+            return ( ( pxTCB != NULL ) && ( pxTCB->pxCBSServer != NULL ) ) ? pdTRUE : pdFALSE;
+        }
+
+        static BaseType_t prvEDFShouldPreempt( const TCB_t * pxCandidate,
+                                               const TCB_t * pxCurrent )
+        {
+            if( pxCandidate->xAbsDeadline < pxCurrent->xAbsDeadline )
+            {
+                return pdTRUE;
+            }
+
+            if( pxCandidate->xAbsDeadline > pxCurrent->xAbsDeadline )
+            {
+                return pdFALSE;
+            }
+
+            /* On equal deadlines, prefer periodic (non-CBS) over CBS to avoid
+             * starving periodic EDF tasks when deadlines repeatedly coincide. */
+            if( ( prvTaskIsCBSManaged( pxCandidate ) == pdFALSE ) &&
+                ( prvTaskIsCBSManaged( pxCurrent ) != pdFALSE ) )
+            {
+                return pdTRUE;
+            }
+
+            return pdFALSE;
+        }
+
+        static void prvCBSRefreshReadyListPosition( TCB_t * pxTCB )
+        {
+            List_t * pxContainer = ( List_t * ) listLIST_ITEM_CONTAINER( &( pxTCB->xStateListItem ) );
+
+            if( pxContainer == NULL )
+            {
+                return;
+            }
+
+            #if ( configUSE_SRP == 1 )
+                if( pxContainer != &xReadySRPTasksList )
+                {
+                    return;
+                }
+            #else
+                if( pxContainer != &xReadyEDFTasksList )
+                {
+                    return;
+                }
+            #endif
+
+            ( void ) uxListRemove( &( pxTCB->xStateListItem ) );
+            listSET_LIST_ITEM_VALUE( &( pxTCB->xStateListItem ), pxTCB->xAbsDeadline );
+            vListInsert( pxContainer, &( pxTCB->xStateListItem ) );
+        }
+    #endif /* configUSE_CBS == 1 */
+
 #endif /* configUSE_EDF == 1 */
 /*-----------------------------------------------------------*/
 
@@ -8694,6 +8827,68 @@ void vTaskGetCurrentDebugSnapshot( TaskDebugSnapshot_t * pxSnapshot )
         pxSnapshot->uxStackDepthWords = pxTCB->uxStackDepthWords;
     #endif
 }
+/*-----------------------------------------------------------*/
+
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_CBS == 1 ) )
+
+    BaseType_t xTaskCBSBindToServer( TaskHandle_t xTask,
+                                     void * pvCBSServer )
+    {
+        TCB_t * pxTCB;
+        BaseType_t xReturn = pdFAIL;
+
+        pxTCB = prvGetTCBFromHandle( xTask );
+
+        taskENTER_CRITICAL();
+        {
+            if( ( pxTCB != NULL ) && ( pvCBSServer != NULL ) )
+            {
+                pxTCB->pxCBSServer = pvCBSServer;
+                pxTCB->uxCBSJobID = ( UBaseType_t ) 0U;
+                xReturn = pdPASS;
+            }
+        }
+        taskEXIT_CRITICAL();
+
+        return xReturn;
+    }
+
+    BaseType_t xTaskCBSUnbindFromServer( TaskHandle_t xTask )
+    {
+        TCB_t * pxTCB;
+        BaseType_t xReturn = pdFAIL;
+
+        pxTCB = prvGetTCBFromHandle( xTask );
+
+        taskENTER_CRITICAL();
+        {
+            if( pxTCB != NULL )
+            {
+                pxTCB->pxCBSServer = NULL;
+                pxTCB->uxCBSJobID = ( UBaseType_t ) 0U;
+                xReturn = pdPASS;
+            }
+        }
+        taskEXIT_CRITICAL();
+
+        return xReturn;
+    }
+
+    BaseType_t xTaskCBSIsManaged( TaskHandle_t xTask )
+    {
+        TCB_t * pxTCB = prvGetTCBFromHandle( xTask );
+
+        return ( ( pxTCB != NULL ) && ( pxTCB->pxCBSServer != NULL ) ) ? pdTRUE : pdFALSE;
+    }
+
+    CBS_Server_t * pxTaskCBSGetServer( TaskHandle_t xTask )
+    {
+        TCB_t * pxTCB = prvGetTCBFromHandle( xTask );
+
+        return ( pxTCB != NULL ) ? ( CBS_Server_t * ) pxTCB->pxCBSServer : NULL;
+    }
+
+#endif /* ( ( configUSE_EDF == 1 ) && ( configUSE_CBS == 1 ) ) */
 /*-----------------------------------------------------------*/
 
 #if ( ( INCLUDE_xTaskGetSchedulerState == 1 ) || ( configUSE_TIMERS == 1 ) )

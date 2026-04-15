@@ -10,6 +10,7 @@
 
 #if ( configUSE_CBS == 1 )
 
+#include <stdio.h>
 #include <string.h>
 #include "FreeRTOS.h"
 #include "task.h"
@@ -25,10 +26,10 @@ static UBaseType_t uxCBSServerCount = 0;
 
 /* Global job pool for aperiodic jobs */
 static CBS_Job_t xCBSJobPool[ configCBS_MAX_PENDING_JOBS ];
-static UBaseType_t uxCBSJobPoolNextFree = 0;
 
 /* Pointer to currently active CBS server (for tick accounting) */
 static CBS_Server_t *pxActiveCBSServer = NULL;
+static BaseType_t xCBSInitialised = pdFALSE;
 
 /* ============================================================================
  * Utility Functions
@@ -54,16 +55,15 @@ static CBS_Server_t * prvCBSFindServerByID( UBaseType_t uxServerID )
  */
 static CBS_Job_t * prvCBSAllocateJob( void )
 {
-    if( uxCBSJobPoolNextFree >= configCBS_MAX_PENDING_JOBS )
+    for( UBaseType_t ux = 0; ux < ( UBaseType_t ) configCBS_MAX_PENDING_JOBS; ux++ )
     {
-        /* Pool exhausted */
-        return NULL;
+        if( xCBSJobPool[ ux ].xTaskHandle == NULL )
+        {
+            return &xCBSJobPool[ ux ];
+        }
     }
-    
-    CBS_Job_t *pxJob = &xCBSJobPool[ uxCBSJobPoolNextFree ];
-    uxCBSJobPoolNextFree++;
-    
-    return pxJob;
+
+    return NULL;
 }
 
 /**
@@ -71,9 +71,18 @@ static CBS_Job_t * prvCBSAllocateJob( void )
  */
 static void prvCBSReleaseJob( CBS_Job_t *pxJob )
 {
-    /* For simplicity, we don't recycle. A more sophisticated implementation
-     * could maintain a free list. */
-    (void) pxJob;
+    if( pxJob != NULL )
+    {
+        ( void ) memset( pxJob, 0, sizeof( *pxJob ) );
+    }
+}
+
+static void prvCBSEnsureInitialised( void )
+{
+    if( xCBSInitialised == pdFALSE )
+    {
+        vCBSInit();
+    }
 }
 
 /* ============================================================================
@@ -86,6 +95,8 @@ CBS_Server_t * xCBSServerCreate(
     const char *pcServerName
 )
 {
+    prvCBSEnsureInitialised();
+
     /* Reject if capacity >= period (invalid CBS parameters) */
     if( ( xCapacityTicks == 0 ) || ( xPeriodTicks == 0 ) || 
         ( xCapacityTicks > xPeriodTicks ) )
@@ -109,7 +120,7 @@ CBS_Server_t * xCBSServerCreate(
     /* Initialize server state */
     pxNewServer->xCapacityTicks = xCapacityTicks;
     pxNewServer->xPeriodTicks = xPeriodTicks;
-    pxNewServer->xAbsDeadline = 0;
+    pxNewServer->xAbsDeadline = xTaskGetTickCount() + xPeriodTicks;
     pxNewServer->xRemainingBudget = xCapacityTicks;
     pxNewServer->xLastReplenishTime = xTaskGetTickCount();
     pxNewServer->uxServerID = uxCBSServerCount;
@@ -163,7 +174,9 @@ void vCBSServerDelete( CBS_Server_t *pxServer )
     while( listCURRENT_LIST_LENGTH( &pxServer->xPendingJobsList ) > 0 )
     {
         ListItem_t *pxItem = listGET_HEAD_ENTRY( &pxServer->xPendingJobsList );
+        CBS_Job_t *pxJob = ( CBS_Job_t * ) listGET_LIST_ITEM_OWNER( pxItem );
         uxListRemove( pxItem );
+        prvCBSReleaseJob( pxJob );
     }
 
     if( pxActiveCBSServer == pxServer )
@@ -183,9 +196,17 @@ BaseType_t xCBSSubmitJob(
     TaskHandle_t xTask
 )
 {
+    prvCBSEnsureInitialised();
+
     if( pxServer == NULL || xTask == NULL )
     {
         return pdFALSE;
+    }
+
+    if( ( pxServer->xRemainingBudget == ( TickType_t ) 0U ) ||
+        ( xTaskGetTickCount() >= pxServer->xAbsDeadline ) )
+    {
+        vCBSReplenishBudget( pxServer );
     }
 
     /* Allocate a job descriptor */
@@ -199,6 +220,8 @@ BaseType_t xCBSSubmitJob(
     pxJob->xTaskHandle = xTask;
     pxJob->xArrivalTime = xTaskGetTickCount();
     pxJob->uxJobID = pxServer->uxTotalJobsSubmitted++;
+    listSET_LIST_ITEM_OWNER( &pxJob->xJobListItem, pxJob );
+    listSET_LIST_ITEM_VALUE( &pxJob->xJobListItem, pxJob->xArrivalTime );
 
     /* Add job to server's pending queue */
     vListInsertEnd( &pxServer->xPendingJobsList, &pxJob->xJobListItem );
@@ -249,6 +272,7 @@ BaseType_t xCBSConsumeBudget(
     if( pxServer->xRemainingBudget < ulTicksUsed )
     {
         /* Budget exhausted or insufficient */
+        pxServer->xRemainingBudget = ( TickType_t ) 0U;
         return pdFALSE;
     }
 
@@ -325,8 +349,8 @@ BaseType_t xCBSAdmissionTest(
 void vCBSInit( void )
 {
     uxCBSServerCount = 0;
-    uxCBSJobPoolNextFree = 0;
     pxActiveCBSServer = NULL;
+    xCBSInitialised = pdTRUE;
 
     memset( pxCBSServers, 0, sizeof( pxCBSServers ) );
     memset( xCBSJobPool, 0, sizeof( xCBSJobPool ) );
@@ -345,12 +369,27 @@ void vCBSDeinit( void )
 
     uxCBSServerCount = 0;
     pxActiveCBSServer = NULL;
+    xCBSInitialised = pdFALSE;
 }
 
 void vCBSTickUpdate( void )
 {
-    /* Called on each tick while a CBS task is running.
-     * Stub: to be implemented with real budget decrement logic. */
+    TaskHandle_t xTask = xTaskGetCurrentTaskHandle();
+    CBS_Server_t *pxServer = pxTaskCBSGetServer( xTask );
+
+    if( pxServer != NULL )
+    {
+        pxActiveCBSServer = pxServer;
+
+        if( xCBSConsumeBudget( pxServer, ( TickType_t ) 1U ) == pdFALSE )
+        {
+            vCBSReplenishBudget( pxServer );
+        }
+    }
+    else
+    {
+        pxActiveCBSServer = NULL;
+    }
 }
 
 CBS_Server_t * pxCBSGetActiveServer( void )
@@ -360,10 +399,63 @@ CBS_Server_t * pxCBSGetActiveServer( void )
 
 BaseType_t xCBSIsTaskManaged( TaskHandle_t xTask )
 {
-    /* Stub: check if task's pxCBSServer field is non-NULL */
-    /* To be implemented with proper TCB access */
-    (void) xTask;
-    return pdFALSE;
+    return xTaskCBSIsManaged( xTask );
 }
+
+#if ( configUSE_SRP == 0 )
+
+BaseType_t xTaskCreateCBS( TaskFunction_t pxTaskCode,
+                           const char * const pcName,
+                           const configSTACK_DEPTH_TYPE uxStackDepth,
+                           void * const pvParameters,
+                           TaskHandle_t * const pxCreatedTask,
+                           uint32_t ulServerPeriodMs,
+                           uint32_t ulServerBudgetMs,
+                           uint32_t ulRelDeadlineMs,
+                           CBS_Server_t * pxServer )
+{
+    BaseType_t xReturn;
+
+    if( ( pxCreatedTask == NULL ) || ( pxServer == NULL ) )
+    {
+        return pdFAIL;
+    }
+
+    if( ( pdMS_TO_TICKS( ulServerPeriodMs ) != pxServer->xPeriodTicks ) ||
+        ( pdMS_TO_TICKS( ulServerBudgetMs ) != pxServer->xCapacityTicks ) )
+    {
+        return pdFAIL;
+    }
+
+    if( pdMS_TO_TICKS( ulRelDeadlineMs ) > pdMS_TO_TICKS( ulServerPeriodMs ) )
+    {
+        return pdFAIL;
+    }
+
+    xReturn = xTaskCreate( pxTaskCode,
+                           pcName,
+                           uxStackDepth,
+                           pvParameters,
+                           pxCreatedTask,
+                           ulServerPeriodMs,
+                           ulServerBudgetMs,
+                           ulRelDeadlineMs );
+
+    if( xReturn != pdPASS )
+    {
+        return xReturn;
+    }
+
+    if( xTaskCBSBindToServer( *pxCreatedTask, pxServer ) != pdPASS )
+    {
+        vTaskDelete( *pxCreatedTask );
+        *pxCreatedTask = NULL;
+        return pdFAIL;
+    }
+
+    return pdPASS;
+}
+
+#endif /* configUSE_SRP == 0 */
 
 #endif /* #if ( configUSE_CBS == 1 ) */

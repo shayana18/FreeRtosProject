@@ -222,6 +222,18 @@
      */
     BaseType_t xCBSIsTaskManaged( TaskHandle_t xTask );
 
+    #if ( configUSE_SRP == 0 )
+        BaseType_t xTaskCreateCBS( TaskFunction_t pxTaskCode,
+                                   const char * const pcName,
+                                   const configSTACK_DEPTH_TYPE uxStackDepth,
+                                   void * const pvParameters,
+                                   TaskHandle_t * const pxCreatedTask,
+                                   uint32_t ulServerPeriodMs,
+                                   uint32_t ulServerBudgetMs,
+                                   uint32_t ulRelDeadlineMs,
+                                   CBS_Server_t * pxServer );
+    #endif
+
     /* *INDENT-OFF* */
     #ifdef __cplusplus
         }

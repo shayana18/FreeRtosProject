@@ -6,7 +6,9 @@
 #include "task_trace.h"
 
 #if ( configUSE_EDF == 1)
-    #if(configUSE_SRP == 0)
+    #if(configUSE_CBS == 1)
+        #include "cbs_tests/test_2.h"
+    #elif(configUSE_SRP == 0)
         #include "edf_tests/test_1.h"
         #include "edf_tests/test_2.h"
         #include "edf_tests/test_3.h"
@@ -59,7 +61,10 @@ int main( void )
 {
     
     #if ( configUSE_EDF == 1)
-        #if (configUSE_SRP == 0)
+        #if ( configUSE_CBS == 1 )
+        // Two periodic tasks plus two CBS-managed aperiodic tasks.
+        cbs_2_run();
+        #elif (configUSE_SRP == 0)
         // Simple edf implicit deadlinetest case with 3 tasks added at startup with a fairly low utilization.
         // edf_1_run(); 
 
