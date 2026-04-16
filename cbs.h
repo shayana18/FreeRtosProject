@@ -15,6 +15,10 @@
 
     #include "list.h"
 
+    #ifndef CBS_SERVER_INTEGRITY_TAG
+        #define CBS_SERVER_INTEGRITY_TAG    ( ( UBaseType_t ) 0xC0B5007u )
+    #endif
+
     /* *INDENT-OFF* */
     #ifdef __cplusplus
         extern "C" {
@@ -33,7 +37,6 @@
      * - xAbsDeadline: Absolute deadline of current server job (Ds)
      * - xRemainingBudget: Budget available in current period (cs)
      * - xLastReplenishTime: Tick count when budget was last replenished
-     * - xPendingJobsList: Queue of aperiodic task handles waiting for service
      * - uxServerID: Unique server identifier
      */
     typedef struct xCBS_Server
@@ -47,33 +50,18 @@
         TickType_t xRemainingBudget;        /**< cs: remaining budget in current period */
         TickType_t xLastReplenishTime;      /**< Tick count when budget was last replenished */
 
-        /* Aperiodic job queue */
-        List_t xPendingJobsList;            /**< Queue of aperiodic task handles awaiting service */
-
         /* Server identification and debugging */
         UBaseType_t uxServerID;             /**< Unique server identifier for tracking/debugging */
         char pcServerName[ configMAX_TASK_NAME_LEN ];  /**< Descriptive server name */
+        TaskHandle_t xWorkerTaskHandle;     /**< CBS worker task currently bound to this server. */
 
         /* Admission control and statistics */
         UBaseType_t uxTotalJobsSubmitted;   /**< Lifetime count of jobs submitted to this server */
         UBaseType_t uxTotalJobsCompleted;   /**< Lifetime count of completed jobs */
+        BaseType_t xJobRunning;             /**< pdTRUE iff one job is currently running on this server */
+        UBaseType_t uxIntegrityTag;         /**< Integrity tag used to detect server memory corruption. */
 
     } CBS_Server_t;
-
-    /**
-     * CBS_Job_t
-     * 
-     * Represents an aperiodic job submitted to a CBS server.
-     * Tracks the task, arrival time, and position in the server's job queue.
-     */
-    typedef struct xCBS_Job
-    {
-        TaskHandle_t xTaskHandle;           /**< Task handle for the aperiodic task */
-        TickType_t xArrivalTime;            /**< Tick count when this job was submitted */
-        UBaseType_t uxJobID;                /**< Sequential job ID within this task */
-        ListItem_t xJobListItem;            /**< List node for pending jobs queue */
-
-    } CBS_Job_t;
 
     /**
      * Callback hook for CBS job completion.
@@ -121,14 +109,21 @@
     );
 
     /**
-     * Retrieve the next aperiodic task to run from the server's pending queue.
-     * Called by scheduler when current CBS job completes.
-     * 
-     * @param pxServer  CBS server to query
-     * 
-     * @return Next task handle from pending queue, NULL if none
+     * Mark the current CBS-managed job as complete.
+     *
+     * Workers should call this after finishing their work so the same task can
+     * accept the next submitted job.
      */
-    TaskHandle_t xCBSGetNextPendingJob( CBS_Server_t *pxServer );
+    BaseType_t xCBSCompleteJob( void );
+
+    /**
+     * Block inside a CBS-managed worker routine until a submitted job arrives.
+     *
+     * @param xTicksToWait  Maximum time to wait for a pending CBS job
+     *
+     * @return pdTRUE if a job was received, pdFALSE on timeout
+     */
+    BaseType_t xCBSWaitForJob( TickType_t xTicksToWait );
 
     /**
      * Consume budget from a CBS server due to CPU utilization.
@@ -200,20 +195,6 @@
     void vCBSDeinit( void );
 
     /**
-     * Called by scheduler on each tick while a CBS task is running.
-     * Updates budget consumption and checks for budget exhaustion.
-     */
-    void vCBSTickUpdate( void );
-
-    /**
-     * Get pointer to currently active CBS server (if any).
-     * Used by scheduler to track which server's budget to decrement.
-     * 
-     * @return Pointer to active CBS_Server_t, NULL if no CBS task running
-     */
-    CBS_Server_t * pxCBSGetActiveServer( void );
-
-    /**
      * Determine if a given task is CBS-managed (vs. periodic EDF).
      * 
      * @param xTask  Task to query
@@ -223,6 +204,19 @@
     BaseType_t xCBSIsTaskManaged( TaskHandle_t xTask );
 
     #if ( configUSE_SRP == 0 )
+        /**
+         * Create a CBS-managed worker bound to an existing server.
+         *
+         * This avoids repeating server period/budget at each task creation call.
+         * The worker's EDF timing parameters are derived from the server.
+         */
+        BaseType_t xTaskCreateCBSWorker( TaskFunction_t pxTaskCode,
+                                         const char * const pcName,
+                                         const configSTACK_DEPTH_TYPE uxStackDepth,
+                                         void * const pvParameters,
+                                         TaskHandle_t * const pxCreatedTask,
+                                         CBS_Server_t * pxServer );
+
         BaseType_t xTaskCreateCBS( TaskFunction_t pxTaskCode,
                                    const char * const pcName,
                                    const configSTACK_DEPTH_TYPE uxStackDepth,

@@ -27,6 +27,8 @@ void vTraceSignalDeadlineMiss( void );
 void vTraceClearDeadlineMissSignal( void );
 void vTraceDeadlineMissTick( void );
 void vApplicationDeadlineMissHook( void );
+struct tskTaskControlBlock;
+void vApplicationStackOverflowHook( struct tskTaskControlBlock * xTask, char * pcTaskName );
 
 #define traceTASK_SWITCHED_IN()    vTraceTaskSwitchedIn( ( uint32_t ) ( uintptr_t ) pxCurrentTCB->pxTaskTag )
 

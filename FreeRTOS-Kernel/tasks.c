@@ -27,8 +27,8 @@
  */
 
 /* Standard includes. */
-#include "portmacro.h"
 #include <stdint.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -431,6 +431,7 @@ typedef struct tskTaskControlBlock       /* The old naming convention is used to
     #endif
     #if ( ( configUSE_EDF == 1 ) && ( configUSE_CBS == 1 ) )
         void * pxCBSServer;                  /**< Pointer to CBS_Server_t if task is CBS-managed, NULL otherwise. */
+        BaseType_t xCBSJobOutstanding;       /**< pdTRUE while a CBS job is active for this task. */
         UBaseType_t uxCBSJobID;              /**< Sequential job ID for CBS jobs submitted by this task. */
     #endif
     #if ( configNUMBER_OF_CORES > 1 )
@@ -3614,6 +3615,15 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
         pxNewTCB->xWcetTicks = ( TickType_t ) 0U;
         pxNewTCB->xRelDeadline = portMAX_DELAY;
         pxNewTCB->xAbsDeadline = portMAX_DELAY;
+
+        #if ( configUSE_CBS == 1 )
+        {
+            /* All tasks start as non-CBS until explicitly bound to a server. */
+            pxNewTCB->pxCBSServer = NULL;
+            pxNewTCB->xCBSJobOutstanding = pdFALSE;
+            pxNewTCB->uxCBSJobID = ( UBaseType_t ) 0U;
+        }
+        #endif
     }
     #endif
     #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
@@ -6700,15 +6710,19 @@ BaseType_t xTaskIncrementTick( void )
                     {
                         CBS_Server_t * pxServer = ( CBS_Server_t * ) pxCurrentTCB->pxCBSServer;
 
-                        if( ( pxServer != NULL ) && ( pxServer->xRemainingBudget > ( TickType_t ) 0U ) )
+                        if( pxServer != NULL )
                         {
+                            configASSERT( ( ( uintptr_t ) pxServer & ( ( uintptr_t ) sizeof( uintptr_t ) - ( uintptr_t ) 1U ) ) == ( uintptr_t ) 0U );
+                            configASSERT( pxServer->xWorkerTaskHandle == ( TaskHandle_t ) pxCurrentTCB );
+                            configASSERT( pxServer->uxIntegrityTag == CBS_SERVER_INTEGRITY_TAG );
+
                             pxServer->xRemainingBudget--;
 
                             if( pxServer->xRemainingBudget == ( TickType_t ) 0U )
                             {
                                 pxServer->xRemainingBudget = pxServer->xCapacityTicks;
-                                pxCurrentTCB->xAbsDeadline = xConstTickCount + pxServer->xPeriodTicks;
-                                pxServer->xAbsDeadline = pxCurrentTCB->xAbsDeadline;
+                                pxServer->xAbsDeadline = pxServer->xAbsDeadline + pxServer->xPeriodTicks;
+                                pxCurrentTCB->xAbsDeadline = pxServer->xAbsDeadline;
                                 prvCBSRefreshReadyListPosition( pxCurrentTCB );
                                 xSwitchRequired = pdTRUE;
                             }
@@ -8199,8 +8213,17 @@ static void prvCheckTasksWaitingTermination( void )
         {
             #if ( configNUMBER_OF_CORES == 1 )
             {
+                pxTCB = NULL;
+
                 taskENTER_CRITICAL();
                 {
+                    if( listLIST_IS_EMPTY( &xTasksWaitingTermination ) != pdFALSE )
+                    {
+                        /* Counter/list mismatch indicates memory corruption or an
+                         * unexpected list update sequence. Stop the cleanup loop. */
+                        uxDeletedTasksWaitingCleanUp = ( UBaseType_t ) 0U;
+                    }
+                    else
                     {
                         /* MISRA Ref 11.5.3 [Void pointer assignment] */
                         /* More details at: https://github.com/FreeRTOS/FreeRTOS-Kernel/blob/main/MISRA.md#rule-115 */
@@ -8213,7 +8236,14 @@ static void prvCheckTasksWaitingTermination( void )
                 }
                 taskEXIT_CRITICAL();
 
-                prvDeleteTCB( pxTCB );
+                if( pxTCB != NULL )
+                {
+                    prvDeleteTCB( pxTCB );
+                }
+                else
+                {
+                    break;
+                }
             }
             #else /* #if( configNUMBER_OF_CORES == 1 ) */
             {
@@ -8844,6 +8874,8 @@ void vTaskGetCurrentDebugSnapshot( TaskDebugSnapshot_t * pxSnapshot )
             if( ( pxTCB != NULL ) && ( pvCBSServer != NULL ) )
             {
                 pxTCB->pxCBSServer = pvCBSServer;
+                ( ( CBS_Server_t * ) pvCBSServer )->xWorkerTaskHandle = xTask;
+                pxTCB->xCBSJobOutstanding = pdFALSE;
                 pxTCB->uxCBSJobID = ( UBaseType_t ) 0U;
                 xReturn = pdPASS;
             }
@@ -8864,7 +8896,15 @@ void vTaskGetCurrentDebugSnapshot( TaskDebugSnapshot_t * pxSnapshot )
         {
             if( pxTCB != NULL )
             {
+                CBS_Server_t * pxServer = ( CBS_Server_t * ) pxTCB->pxCBSServer;
+
+                if( ( pxServer != NULL ) && ( pxServer->xWorkerTaskHandle == xTask ) )
+                {
+                    pxServer->xWorkerTaskHandle = NULL;
+                }
+
                 pxTCB->pxCBSServer = NULL;
+                pxTCB->xCBSJobOutstanding = pdFALSE;
                 pxTCB->uxCBSJobID = ( UBaseType_t ) 0U;
                 xReturn = pdPASS;
             }
@@ -8881,11 +8921,61 @@ void vTaskGetCurrentDebugSnapshot( TaskDebugSnapshot_t * pxSnapshot )
         return ( ( pxTCB != NULL ) && ( pxTCB->pxCBSServer != NULL ) ) ? pdTRUE : pdFALSE;
     }
 
+    BaseType_t xTaskCBSHasOutstandingJob( TaskHandle_t xTask )
+    {
+        TCB_t * pxTCB = prvGetTCBFromHandle( xTask );
+
+        return ( ( pxTCB != NULL ) && ( pxTCB->xCBSJobOutstanding != pdFALSE ) ) ? pdTRUE : pdFALSE;
+    }
+
+    BaseType_t xTaskCBSSetOutstandingJob( TaskHandle_t xTask,
+                                          BaseType_t xOutstanding )
+    {
+        TCB_t * pxTCB;
+        BaseType_t xReturn = pdFAIL;
+
+        pxTCB = prvGetTCBFromHandle( xTask );
+
+        taskENTER_CRITICAL();
+        {
+            if( pxTCB != NULL )
+            {
+                pxTCB->xCBSJobOutstanding = ( xOutstanding != pdFALSE ) ? pdTRUE : pdFALSE;
+                xReturn = pdPASS;
+            }
+        }
+        taskEXIT_CRITICAL();
+
+        return xReturn;
+    }
+
     CBS_Server_t * pxTaskCBSGetServer( TaskHandle_t xTask )
     {
         TCB_t * pxTCB = prvGetTCBFromHandle( xTask );
 
         return ( pxTCB != NULL ) ? ( CBS_Server_t * ) pxTCB->pxCBSServer : NULL;
+    }
+
+    BaseType_t xTaskCBSUpdateDeadline( TaskHandle_t xTask,
+                                       TickType_t xAbsDeadline )
+    {
+        TCB_t * pxTCB;
+        BaseType_t xReturn = pdFAIL;
+
+        pxTCB = prvGetTCBFromHandle( xTask );
+
+        taskENTER_CRITICAL();
+        {
+            if( ( pxTCB != NULL ) && ( pxTCB->pxCBSServer != NULL ) )
+            {
+                pxTCB->xAbsDeadline = xAbsDeadline;
+                prvCBSRefreshReadyListPosition( pxTCB );
+                xReturn = pdPASS;
+            }
+        }
+        taskEXIT_CRITICAL();
+
+        return xReturn;
     }
 
 #endif /* ( ( configUSE_EDF == 1 ) && ( configUSE_CBS == 1 ) ) */

@@ -473,7 +473,12 @@ typedef enum
                                      void * pvCBSServer ) PRIVILEGED_FUNCTION;
     BaseType_t xTaskCBSUnbindFromServer( TaskHandle_t xTask ) PRIVILEGED_FUNCTION;
     BaseType_t xTaskCBSIsManaged( TaskHandle_t xTask ) PRIVILEGED_FUNCTION;
+    BaseType_t xTaskCBSHasOutstandingJob( TaskHandle_t xTask ) PRIVILEGED_FUNCTION;
+    BaseType_t xTaskCBSSetOutstandingJob( TaskHandle_t xTask,
+                                          BaseType_t xOutstanding ) PRIVILEGED_FUNCTION;
     CBS_Server_t * pxTaskCBSGetServer( TaskHandle_t xTask ) PRIVILEGED_FUNCTION;
+    BaseType_t xTaskCBSUpdateDeadline( TaskHandle_t xTask,
+                                       TickType_t xAbsDeadline ) PRIVILEGED_FUNCTION;
 #endif
 
 #if ( ( configSUPPORT_DYNAMIC_ALLOCATION == 1 ) && ( configNUMBER_OF_CORES > 1 ) && ( configUSE_CORE_AFFINITY == 1 ) )

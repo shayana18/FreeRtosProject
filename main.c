@@ -62,9 +62,18 @@ int main( void )
     
     #if ( configUSE_EDF == 1)
         #if ( configUSE_CBS == 1 )
-        // Two periodic tasks plus two CBS-managed aperiodic tasks.
+        // Simple cbs test with one periodic EDF task and one CBS-managed aperiodic task.
+        // cbs_1_run();
+        // Multiple CBS server test with two periodic tasks plus two CBS-managed aperiodic tasks.
         cbs_2_run();
-        #elif (configUSE_SRP == 0)
+        #elif (configUSE_SRP == 1 )
+        // srp_1_run();
+        // srp_2_run();
+        // srp_3_run();
+        // srp_4_run();
+        // srp_5_run();
+        // srp_6_run();
+        #elif (configUSE_SRP == 0 && configUSE_CBS == 0 )
         // Simple edf implicit deadlinetest case with 3 tasks added at startup with a fairly low utilization.
         // edf_1_run(); 
 
@@ -88,13 +97,6 @@ int main( void )
 
         // Seven tasks with binary-encoded trace IDs and two intentional single deadline-miss events.
         // edf_8_run();
-        #else
-            // srp_1_run();
-            // srp_2_run();
-            // srp_3_run();
-            // srp_4_run();
-            // srp_5_run();
-            // srp_6_run();
         #endif 
     #endif
 
@@ -186,9 +188,6 @@ void vHardFaultHandlerC( uint32_t * pulFaultStack,
         xHardFaultDebugContext.ulLr = pulFaultStack[ 5 ];
         xHardFaultDebugContext.ulPc = pulFaultStack[ 6 ];
         xHardFaultDebugContext.ulXpsr = pulFaultStack[ 7 ];
-        ((uint32_t *) xHardFaultDebugContext.xTaskSnapshot.pxTopOfStack)[13];
-        ((uint32_t *) xHardFaultDebugContext.xTaskSnapshot.pxTopOfStack)[14];
-        ((uint32_t *) xHardFaultDebugContext.xTaskSnapshot.pxTopOfStack)[15];
     }
 
     vTaskGetCurrentDebugSnapshot( ( TaskDebugSnapshot_t * ) &xHardFaultDebugContext.xTaskSnapshot );

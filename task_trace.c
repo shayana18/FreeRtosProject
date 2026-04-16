@@ -94,3 +94,4 @@ void vTraceDeadlineMissTick( void )
         }
     }
 }
+

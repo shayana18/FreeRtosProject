@@ -3214,6 +3214,7 @@ typedef struct xSTATIC_TCB
         #endif
         #if ( configUSE_CBS == 1 )
             void * pxCBSServer;                  /**< Mirrors TCB_t::pxCBSServer for static allocation size compatibility. */
+            BaseType_t xCBSJobOutstanding;       /**< Mirrors TCB_t::xCBSJobOutstanding for static allocation size compatibility. */
             UBaseType_t uxCBSJobID;              /**< Mirrors TCB_t::uxCBSJobID for static allocation size compatibility. */
         #endif
     #endif

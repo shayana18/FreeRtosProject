@@ -26,9 +26,10 @@
 		#define configCBS_MAX_SERVERS 4U
 	#endif
 
-	/* Maximum number of pending aperiodic jobs across all CBS servers. */
+	/* Legacy CBS job-pool size. CBS currently allows only one active job per
+	 * server and does not maintain a pending-job queue, so 1 is sufficient. */
 	#ifndef configCBS_MAX_PENDING_JOBS
-		#define configCBS_MAX_PENDING_JOBS 32U
+		#define configCBS_MAX_PENDING_JOBS 1U
 	#endif
 
 	/* Allow budget carryover from one period to the next (0 = no, 1 = yes).
@@ -57,7 +58,7 @@
  * per-task dynamic stacks. Set to 0 to keep SRP scheduling/resource logic
  * while disabling shared stack storage. */
 #ifndef configUSE_SRP_SHARED_STACKS
-	#define configUSE_SRP_SHARED_STACKS 1
+	#define configUSE_SRP_SHARED_STACKS 0
 #endif
 
 /* Shared run-time stack pool used by EDF+SRP stack-sharing support.

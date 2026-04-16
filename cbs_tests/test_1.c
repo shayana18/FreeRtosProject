@@ -18,9 +18,14 @@
 #define CBS_SERVER_BUDGET_MS     400u
 #define PERIODIC_TASK_PERIOD_MS  1500u
 #define PERIODIC_TASK_WORK_MS     300u
+#define APERIODIC_RELEASE_MS      100u
+#define CBS_TEST_STACK_WORDS      512u
 
 static volatile uint32_t ulPeriodicBeats;
 static volatile uint32_t ulAperiodicWorkIters;
+static volatile uint32_t ulAperiodicSubmitFailures;
+static TaskHandle_t xAperiodicWorkerHandle;
+static CBS_Server_t * pxAperiodicServer;
 
 static void vPeriodicTask( void * pvParameters )
 {
@@ -43,9 +48,33 @@ static void vCBSAperiodicTask( void * pvParameters )
 
     for( ; ; )
     {
-        spin_ms( 250u );
-        ulAperiodicWorkIters++;
-        ( void ) vTaskDelay( pdMS_TO_TICKS( 1000u ) );
+        if( xCBSWaitForJob( portMAX_DELAY ) == pdTRUE )
+        {
+            spin_ms( 250u );
+            ulAperiodicWorkIters++;
+            ( void ) xCBSCompleteJob();
+        }
+    }
+}
+
+static void vAperiodicArrivalTask( void * pvParameters )
+{
+    TickType_t xLastWake;
+
+    ( void ) pvParameters;
+    xLastWake = xTaskGetTickCount();
+
+    for( ; ; )
+    {
+        ( void ) xTaskDelayUntil( &xLastWake, pdMS_TO_TICKS( APERIODIC_RELEASE_MS ) );
+
+        if( ( xAperiodicWorkerHandle != NULL ) && ( pxAperiodicServer != NULL ) )
+        {
+            if( xCBSSubmitJob( pxAperiodicServer, xAperiodicWorkerHandle ) == pdFAIL )
+            {
+                ulAperiodicSubmitFailures++;
+            }
+        }
     }
 }
 
@@ -53,6 +82,7 @@ void cbs_1_run( void )
 {
     TaskHandle_t xPeriodic = NULL;
     TaskHandle_t xAperiodic = NULL;
+    TaskHandle_t xArrival = NULL;
     CBS_Server_t * pxServer;
 
     stdio_init_all();
@@ -69,24 +99,34 @@ void cbs_1_run( void )
         }
     }
 
+    pxAperiodicServer = pxServer;
+
     ( void ) xTaskCreate( vPeriodicTask,
                           "PERIODIC",
-                          256,
+                          CBS_TEST_STACK_WORDS,
                           NULL,
                           &xPeriodic,
                           PERIODIC_TASK_PERIOD_MS,
                           PERIODIC_TASK_WORK_MS,
                           PERIODIC_TASK_PERIOD_MS );
 
-    ( void ) xTaskCreateCBS( vCBSAperiodicTask,
-                             "CBS_APER",
-                             256,
-                             NULL,
-                             &xAperiodic,
-                             CBS_SERVER_PERIOD_MS,
-                             CBS_SERVER_BUDGET_MS,
-                             CBS_SERVER_PERIOD_MS,
-                             pxServer );
+    ( void ) xTaskCreateCBSWorker( vCBSAperiodicTask,
+                                   "CBS_APER",
+                                   CBS_TEST_STACK_WORDS,
+                                   NULL,
+                                   &xAperiodic,
+                                   pxServer );
+
+    xAperiodicWorkerHandle = xAperiodic;
+
+    ( void ) xTaskCreate( vAperiodicArrivalTask,
+                          "APER_ARRIVE",
+                          CBS_TEST_STACK_WORDS,
+                          NULL,
+                          &xArrival,
+                          APERIODIC_RELEASE_MS,
+                          20u,
+                          APERIODIC_RELEASE_MS );
 
     if( xPeriodic != NULL )
     {
@@ -97,6 +137,7 @@ void cbs_1_run( void )
     {
         vTaskSetApplicationTaskTag( xAperiodic, ( TaskHookFunction_t ) 2 );
     }
+
 
     vTaskStartScheduler();
 
