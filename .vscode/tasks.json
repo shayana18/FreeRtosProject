@@ -18,6 +18,23 @@
             }
         },
         {
+            "label": "Compile Project (Pico Debug No Opt)",
+            "type": "shell",
+            "isBuildCommand": true,
+            "command": "powershell",
+            "args": [
+                "-NoProfile",
+                "-Command",
+                "cmake -S . -B build -DPICO_DEOPTIMIZED_DEBUG=1; & \"$env:USERPROFILE/.pico-sdk/ninja/v1.12.1/ninja.exe\" -C build"
+            ],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": "$gcc"
+        },
+        {
             "label": "Run Project",
             "type": "process",
             "command": "${env:HOME}/.pico-sdk/picotool/2.2.0-a4/picotool/picotool",
