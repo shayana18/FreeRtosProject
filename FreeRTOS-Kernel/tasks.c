@@ -42,7 +42,7 @@
 #include "task.h"
 #include "timers.h"
 #include "stack_macros.h"
-#if ( ( configUSE_EDF == 1 ) && ( configUSE_CBS == 1 ) )
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
     #include "cbs.h"
 #endif
 
@@ -271,7 +271,7 @@
  * the task.  It is inserted at the end of the list.
  */
 #if ( configUSE_EDF == 1 )
-    #if ( configUSE_SRP == 1 )
+    #if ( ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
         /* Insert SRP tasks ordered by absolute deadline. */
         #define SRP_READY_PRIORITY    ( ( UBaseType_t ) ( configMAX_PRIORITIES - 1U ) )
         #undef prvAddTaskToReadyList
@@ -419,7 +419,7 @@ typedef struct tskTaskControlBlock       /* The old naming convention is used to
         TickType_t xAbsDeadline;             /**< Absolute deadline in ticks. */
         ListItem_t xEDFTaskListItem;         /**< Used to keep EDF tasks in the EDF task registry list. */
     #endif
-    #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+    #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
         UBaseType_t uxPriorityCeiling;       /**< Static SRP preemption level for this task. */
         configSTACK_DEPTH_TYPE uxStackDepthWords; /**< Requested task stack depth in StackType_t words. */
         ListItem_t xSRPTaskListItem;         /**< Used to keep SRP tasks in the SRP task registry list. */
@@ -429,7 +429,7 @@ typedef struct tskTaskControlBlock       /* The old naming convention is used to
             UBaseType_t uxSRPResourceHeldCount[ configSRP_RESOURCE_TYPE_COUNT ]; /**< Runtime held count per resource type for this task. */
         #endif
     #endif
-    #if ( ( configUSE_EDF == 1 ) && ( configUSE_CBS == 1 ) )
+    #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
         void * pxCBSServer;                  /**< Pointer to CBS_Server_t if task is CBS-managed, NULL otherwise. */
         BaseType_t xCBSJobOutstanding;       /**< pdTRUE while a CBS job is active for this task. */
         UBaseType_t uxCBSJobID;              /**< Sequential job ID for CBS jobs submitted by this task. */
@@ -545,7 +545,7 @@ PRIVILEGED_DATA static List_t pxReadyTasksLists[ configMAX_PRIORITIES ]; /**< Pr
     PRIVILEGED_DATA static List_t xReadyEDFTasksList;
     PRIVILEGED_DATA static List_t xEDFTaskRegistryList;
 #endif
-#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
     PRIVILEGED_DATA static List_t xReadySRPTasksList;
     PRIVILEGED_DATA static List_t xSRPTaskRegistryList;
     PRIVILEGED_DATA static UBaseType_t uxSystemCeiling = ( UBaseType_t ) 0U;
@@ -561,11 +561,11 @@ PRIVILEGED_DATA static List_t pxReadyTasksLists[ configMAX_PRIORITIES ]; /**< Pr
     } SRPSharedStackRegion_t;
 
     #if ( configSRP_SHARED_STACK_SIZE == 0U )
-        #error configSRP_SHARED_STACK_SIZE must be > 0 when configUSE_EDF == 1 and configUSE_SRP == 1.
+        #error configSRP_SHARED_STACK_SIZE must be > 0 when configUSE_EDF == 1, configUSE_UP == 1, and configUSE_SRP == 1.
     #endif
 
     #if ( configSRP_SHARED_STACK_MAX_LEVELS == 0U )
-        #error configSRP_SHARED_STACK_MAX_LEVELS must be > 0 when configUSE_EDF == 1 and configUSE_SRP == 1.
+        #error configSRP_SHARED_STACK_MAX_LEVELS must be > 0 when configUSE_EDF == 1, configUSE_UP == 1, and configUSE_SRP == 1.
     #endif
 
     #if ( tskSTATIC_AND_DYNAMIC_ALLOCATION_POSSIBLE == 0 )
@@ -670,13 +670,13 @@ PRIVILEGED_DATA static volatile configRUN_TIME_COUNTER_TYPE ulTotalRunTime[ conf
                                                    ListItem_t * pxTaskListItem,
                                                    List_t * pxRegistryList,
                                                 TickType_t xNextReleaseTime ) PRIVILEGED_FUNCTION;
-    #if ( configUSE_CBS == 1 )
+    #if ( ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
         static BaseType_t prvTaskIsCBSManaged( const TCB_t * pxTCB ) PRIVILEGED_FUNCTION;
         static BaseType_t prvEDFShouldPreempt( const TCB_t * pxCandidate,
                                                const TCB_t * pxCurrent ) PRIVILEGED_FUNCTION;
         static void prvCBSRefreshReadyListPosition( TCB_t * pxTCB ) PRIVILEGED_FUNCTION;
     #endif
-    #if ( configUSE_SRP == 1 )
+    #if ( ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
         #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
             static UBaseType_t uxSRPResourceBlockingCeilingTable[ configSRP_RESOURCE_TYPE_COUNT ];
             static UBaseType_t uxSRPResourceActiveCount[ configSRP_RESOURCE_TYPE_COUNT ]; /* Boolean-like lock state: 0 unlocked, 1 locked. */
@@ -2044,7 +2044,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
     }
 /*-----------------------------------------------------------*/
 
-    #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+    #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
         static BaseType_t prvSRPValidateResourceClaims( const SRPResourceClaim_t * pxResourceClaims,
                                                         UBaseType_t uxClaimedSemaphoreCount )
         {
@@ -3029,7 +3029,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
             }
         }
 
-    #endif /* ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) */
+    #endif /* ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) */
 #endif
 /*-----------------------------------------------------------*/
 
@@ -3133,7 +3133,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
 /*-----------------------------------------------------------*/
 
     #if (configUSE_EDF == 1)
-        #if ( configUSE_SRP == 1 )
+        #if ( ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
             BaseType_t xTaskCreate( TaskFunction_t pxTaskCode,
                                     const char * const pcName,
                                     const configSTACK_DEPTH_TYPE uxStackDepth,
@@ -3616,7 +3616,7 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
         pxNewTCB->xRelDeadline = portMAX_DELAY;
         pxNewTCB->xAbsDeadline = portMAX_DELAY;
 
-        #if ( configUSE_CBS == 1 )
+        #if ( ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
         {
             /* All tasks start as non-CBS until explicitly bound to a server. */
             pxNewTCB->pxCBSServer = NULL;
@@ -3626,7 +3626,7 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
         #endif
     }
     #endif
-    #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+    #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
     {
         pxNewTCB->uxPriorityCeiling = uxPriority;
         pxNewTCB->uxStackDepthWords = ( configSTACK_DEPTH_TYPE ) 0U;
@@ -3654,7 +3654,7 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
         vListInitialiseItem( &( pxNewTCB->xEDFTaskListItem ) );
     }
     #endif
-    #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+    #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
     {
         vListInitialiseItem( &( pxNewTCB->xSRPTaskListItem ) );
     }
@@ -3672,7 +3672,7 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
         listSET_LIST_ITEM_OWNER( &( pxNewTCB->xEDFTaskListItem ), pxNewTCB );
     }
     #endif
-    #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+    #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
     {
         listSET_LIST_ITEM_OWNER( &( pxNewTCB->xSRPTaskListItem ), pxNewTCB );
     }
@@ -3815,7 +3815,7 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
                             pxCurrentTCB = pxNewTCB;
                         }
                     #elif configUSE_EDF == 1
-                        #if ( configUSE_CBS == 1 )
+                        #if ( ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
                             if( prvEDFShouldPreempt( pxNewTCB, pxCurrentTCB ) != pdFALSE )
                         #else
                             if( pxCurrentTCB->xAbsDeadline > pxNewTCB->xAbsDeadline )
@@ -3862,7 +3862,7 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
                 }
             }
             #endif
-            #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+            #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
             {
                 /* Mirror EDF registry behaviour: only periodic SRP tasks take
                  * part in periodic run-time accounting. Internal zero-period
@@ -3947,7 +3947,7 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
                 }
             }
             #endif
-            #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+            #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
             {
                 /* Mirror EDF registry behaviour: only periodic SRP tasks take
                  * part in periodic run-time accounting. Internal zero-period
@@ -4024,7 +4024,7 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
         TCB_t * pxTCB;
         BaseType_t xDeleteTCBInIdleTask = pdFALSE;
         BaseType_t xTaskIsRunningOrYielding;
-        #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) ) && ( configSRP_RESOURCE_TYPE_COUNT > 0U ) && ( configUSE_SRP_RESOURCE_RELEASE_HOOK == 1 )
+        #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) ) && ( configSRP_RESOURCE_TYPE_COUNT > 0U ) && ( configUSE_SRP_RESOURCE_RELEASE_HOOK == 1 )
             BaseType_t xSRPResourceWasHeld[ configSRP_RESOURCE_TYPE_COUNT ] = { pdFALSE };
         #endif
 
@@ -4068,7 +4068,7 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
                 }
             }
             #endif
-            #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+            #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
             {
                 #if ( configSRP_RESOURCE_TYPE_COUNT > 0U ) && ( configUSE_SRP_RESOURCE_RELEASE_HOOK == 1 )
                 {
@@ -4178,7 +4178,7 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
         }
         taskEXIT_CRITICAL();
 
-        #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) ) && ( configSRP_RESOURCE_TYPE_COUNT > 0U ) && ( configUSE_SRP_RESOURCE_RELEASE_HOOK == 1 )
+        #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) ) && ( configSRP_RESOURCE_TYPE_COUNT > 0U ) && ( configUSE_SRP_RESOURCE_RELEASE_HOOK == 1 )
         {
             UBaseType_t uxResourceType;
 
@@ -4298,7 +4298,7 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
                                                        xTimeToWake );
                 }
 
-                #if ( configUSE_SRP == 1 )
+                #if ( ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
                 {
                     if( listLIST_ITEM_CONTAINER( &( pxCurrentTCB->xSRPTaskListItem ) ) == &xSRPTaskRegistryList )
                     {
@@ -5918,7 +5918,7 @@ BaseType_t xTaskResumeAll( void )
                         {
                             /* Trigger a yield when the readied task should run now. */
                             #if ( configUSE_EDF == 1 )
-                                #if ( configUSE_CBS == 1 )
+                                #if ( ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
                                     if( prvEDFShouldPreempt( pxTCB, pxCurrentTCB ) != pdFALSE )
                                 #else
                                     if( pxTCB->xAbsDeadline < pxCurrentTCB->xAbsDeadline )
@@ -6623,7 +6623,7 @@ BaseType_t xTaskIncrementTick( void )
 
         #if ( configUSE_EDF == 1 )
         {
-            #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+            #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
             {
                 /* SRP scheduling uses the same periodic runtime accounting as EDF. */
                 if( ( pxCurrentTCB->xPeriodTicks != ( TickType_t ) 0U ) &&
@@ -6705,7 +6705,7 @@ BaseType_t xTaskIncrementTick( void )
 
                     pxCurrentTCB->xJobExecTicks++;
 
-                    #if ( configUSE_CBS == 1 )
+                    #if ( ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
                     if( prvTaskIsCBSManaged( pxCurrentTCB ) != pdFALSE )
                     {
                         CBS_Server_t * pxServer = ( CBS_Server_t * ) pxCurrentTCB->pxCBSServer;
@@ -6732,7 +6732,7 @@ BaseType_t xTaskIncrementTick( void )
 
                     if( ( prvTickTimeIsAfter( xConstTickCount,
                                               pxCurrentTCB->xAbsDeadline ) != pdFALSE )
-                    #if ( configUSE_CBS == 1 )
+                    #if ( ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
                         && ( prvTaskIsCBSManaged( pxCurrentTCB ) == pdFALSE )
                     #endif
                         )
@@ -6841,7 +6841,7 @@ BaseType_t xTaskIncrementTick( void )
                             /* Preemption is on, switch only if the unblocked task
                              * should run ahead of the current task. */
                             #if ( configUSE_EDF == 1 )
-                                #if ( configUSE_CBS == 1 )
+                                #if ( ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
                                     if( prvEDFShouldPreempt( pxTCB, pxCurrentTCB ) != pdFALSE )
                                 #else
                                     if( pxTCB->xAbsDeadline < pxCurrentTCB->xAbsDeadline )
@@ -7163,7 +7163,7 @@ BaseType_t xTaskIncrementTick( void )
             /* Check for stack overflow, if configured. */
             taskCHECK_FOR_STACK_OVERFLOW();
 
-            #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) && ( configUSE_SRP_SHARED_STACKS == 1 ) )
+            #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) && ( configUSE_SRP_SHARED_STACKS == 1 ) )
             {
                 configASSERT( prvSRPCheckSharedStackGuard( pxCurrentTCB ) != pdFALSE );
             }
@@ -7183,7 +7183,7 @@ BaseType_t xTaskIncrementTick( void )
             /* coverity[misra_c_2012_rule_11_5_violation] */
             #if ( configUSE_EDF == 1 )
             {
-                #if ( configUSE_SRP == 1 )
+                #if ( ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
                 {
                     TCB_t * pxTCB = prvSRPSelectReadyTask();
 
@@ -7211,7 +7211,7 @@ BaseType_t xTaskIncrementTick( void )
                          * pick a CBS-managed task first as required by CBS policy. */
                         TCB_t * pxTCB = ( TCB_t * ) listGET_OWNER_OF_HEAD_ENTRY( &xReadyEDFTasksList );
 
-                        #if ( configUSE_CBS == 1 )
+                        #if ( ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
                         {
                             const TickType_t xHeadDeadline = pxTCB->xAbsDeadline;
                             const ListItem_t * pxEndMarker = listGET_END_MARKER( &xReadyEDFTasksList );
@@ -7252,7 +7252,7 @@ BaseType_t xTaskIncrementTick( void )
             }
             #endif
 
-            #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) && ( configUSE_SRP_SHARED_STACKS == 1 ) )
+            #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) && ( configUSE_SRP_SHARED_STACKS == 1 ) )
             {
                 configASSERT( prvSRPCheckSharedStackGuard( pxCurrentTCB ) != pdFALSE );
             }
@@ -8172,7 +8172,7 @@ static void prvInitialiseTaskLists( void )
         vListInitialise( &xReadyEDFTasksList );
         vListInitialise( &xEDFTaskRegistryList );
     }
-        #if ( configUSE_SRP == 1 )
+        #if ( ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
         {
             vListInitialise( &xReadySRPTasksList );
             vListInitialise( &xSRPTaskRegistryList );
@@ -8681,7 +8681,7 @@ static void prvResetNextTaskUnblockTime( void )
         vListInsert( pxRegistryList, pxTaskListItem );
     }
 
-    #if ( configUSE_CBS == 1 )
+    #if ( ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
         static BaseType_t prvTaskIsCBSManaged( const TCB_t * pxTCB )
         {
             return ( ( pxTCB != NULL ) && ( pxTCB->pxCBSServer != NULL ) ) ? pdTRUE : pdFALSE;
@@ -8720,7 +8720,7 @@ static void prvResetNextTaskUnblockTime( void )
                 return;
             }
 
-            #if ( configUSE_SRP == 1 )
+            #if ( ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
                 if( pxContainer != &xReadySRPTasksList )
                 {
                     return;
@@ -8736,7 +8736,7 @@ static void prvResetNextTaskUnblockTime( void )
             listSET_LIST_ITEM_VALUE( &( pxTCB->xStateListItem ), pxTCB->xAbsDeadline );
             vListInsert( pxContainer, &( pxTCB->xStateListItem ) );
         }
-    #endif /* configUSE_CBS == 1 */
+    #endif /* ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) */
 
 #endif /* configUSE_EDF == 1 */
 /*-----------------------------------------------------------*/
@@ -8836,7 +8836,7 @@ void vTaskGetCurrentDebugSnapshot( TaskDebugSnapshot_t * pxSnapshot )
 
     #if ( ( portSTACK_GROWTH > 0 ) || ( configRECORD_STACK_HIGH_ADDRESS == 1 ) )
         pxSnapshot->pxStackHighAddress = pxTCB->pxEndOfStack;
-    #elif ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+    #elif ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
         if( pxTCB->uxStackDepthWords > ( configSTACK_DEPTH_TYPE ) 0U )
         {
             pxSnapshot->pxStackHighAddress = pxTCB->pxStack + ( pxTCB->uxStackDepthWords - ( configSTACK_DEPTH_TYPE ) 1U );
@@ -8852,14 +8852,14 @@ void vTaskGetCurrentDebugSnapshot( TaskDebugSnapshot_t * pxSnapshot )
         pxSnapshot->xAbsDeadline = pxTCB->xAbsDeadline;
     #endif
 
-    #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+    #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
         pxSnapshot->uxPriorityCeiling = pxTCB->uxPriorityCeiling;
         pxSnapshot->uxStackDepthWords = pxTCB->uxStackDepthWords;
     #endif
 }
 /*-----------------------------------------------------------*/
 
-#if ( ( configUSE_EDF == 1 ) && ( configUSE_CBS == 1 ) )
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
 
     BaseType_t xTaskCBSBindToServer( TaskHandle_t xTask,
                                      void * pvCBSServer )
@@ -8978,7 +8978,7 @@ void vTaskGetCurrentDebugSnapshot( TaskDebugSnapshot_t * pxSnapshot )
         return xReturn;
     }
 
-#endif /* ( ( configUSE_EDF == 1 ) && ( configUSE_CBS == 1 ) ) */
+#endif /* ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) ) */
 /*-----------------------------------------------------------*/
 
 #if ( ( INCLUDE_xTaskGetSchedulerState == 1 ) || ( configUSE_TIMERS == 1 ) )
@@ -11129,7 +11129,7 @@ void vTaskResetState( void )
 
     uxSchedulerSuspended = ( UBaseType_t ) 0U;
 
-    #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+    #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
     {
         uxSystemCeiling = ( UBaseType_t ) 0U;
 

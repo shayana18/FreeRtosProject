@@ -203,7 +203,7 @@ typedef struct xTASK_DEBUG_SNAPSHOT
         TickType_t xRelDeadline;
         TickType_t xAbsDeadline;
     #endif
-    #if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+    #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
         UBaseType_t uxPriorityCeiling;
         configSTACK_DEPTH_TYPE uxStackDepthWords;
     #endif
@@ -220,7 +220,7 @@ typedef enum
     #endif /* INCLUDE_vTaskSuspend */
 } eSleepModeStatus;
 
-#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
 
     #if ( configUSE_SRP_RESOURCE_RELEASE_HOOK == 1 )
         /* Optional application callback invoked after an SRP binary semaphore is released.
@@ -430,7 +430,7 @@ typedef enum
  */
 #if ( configSUPPORT_DYNAMIC_ALLOCATION == 1 )
     #if ( configUSE_EDF == 1 )
-        #if ( configUSE_SRP == 1 ) /* SRP tasks as SRP can only work on top of EDF. */
+        #if ( ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) ) /* SRP tasks as SRP can only work on top of EDF. */
             BaseType_t xTaskCreate( TaskFunction_t pxTaskCode,
                                     const char * const pcName,
                                     const configSTACK_DEPTH_TYPE uxStackDepth,
@@ -461,12 +461,12 @@ typedef enum
     #endif
 #endif
 
-#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
     BaseType_t xTaskSRPAcquireResource( UBaseType_t uxResourceType ) PRIVILEGED_FUNCTION;
     BaseType_t xTaskSRPReleaseResource( UBaseType_t uxResourceType ) PRIVILEGED_FUNCTION;
 #endif
 
-#if ( ( configUSE_EDF == 1 ) && ( configUSE_CBS == 1 ) )
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
     typedef struct xCBS_Server CBS_Server_t;
 
     BaseType_t xTaskCBSBindToServer( TaskHandle_t xTask,
