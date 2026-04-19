@@ -44,7 +44,7 @@
 /* SRP global resource configuration.
  * Resource types are indexed from 0..(configSRP_RESOURCE_TYPE_COUNT-1). */
 #ifndef configSRP_RESOURCE_TYPE_COUNT
-	// CHANGE PER TEST 
+	// IDEALLY DEFINE THIS IN THE TEST
 	#define configSRP_RESOURCE_TYPE_COUNT 2U
 #endif
 
