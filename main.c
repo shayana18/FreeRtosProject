@@ -4,6 +4,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "task_trace.h"
+#include "pico/stdlib.h"
 
 #if ( configUSE_EDF == 1)
     #if(configUSE_CBS == 1)
@@ -61,6 +62,11 @@ static void vApplicationFirstDeadlineMissCaptured( void ) __attribute__( ( noinl
 
 int main( void )
 {
+    uint32_t ulHeartbeat;
+
+    vTraceUsbSerialInit( 1500u );
+    vTraceUsbPrint( "USB serial ready\r\n" );
+
     
     #if ( configUSE_EDF == 1)
         #if ( configUSE_CBS == 1 )
@@ -132,9 +138,10 @@ void vApplicationStackOverflowHook( TaskHandle_t xTask,
     }
 }
 
-void vApplicationDeadlineMissHook( void )
+void vApplicationDeadlineMissHook( uint32_t ulTaskId )
 {
     xDeadlineMissDebugContext.ulMissCount++;
+    vTraceUsbPrint( "Deadline miss: task id=%lu\r\n", ( unsigned long ) ulTaskId );
 
     if( xDeadlineMissDebugContext.ulFirstCaptured == 0u )
     {

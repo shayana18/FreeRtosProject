@@ -19,6 +19,8 @@ extern "C" {
 #define TRACE_DEADLINE_MISS_PIN    15u
 
 void vTraceTaskPinsInit( void );
+void vTraceUsbSerialInit( uint32_t ulWaitForHostMs );
+void vTraceUsbPrint( const char * pcFormat, ... );
 void vTraceWriteTaskCode( uint32_t ulTaskCode );
 void vTraceTaskSwitchedIn( uint32_t ulTaskCode );
 void vTraceSetTaskSwitchSignal( void );
@@ -26,7 +28,7 @@ void vTraceClearTaskSwitchSignal( void );
 void vTraceSignalDeadlineMiss( void );
 void vTraceClearDeadlineMissSignal( void );
 void vTraceDeadlineMissTick( void );
-void vApplicationDeadlineMissHook( void );
+void vApplicationDeadlineMissHook( uint32_t ulTaskId );
 struct tskTaskControlBlock;
 void vApplicationStackOverflowHook( struct tskTaskControlBlock * xTask, char * pcTaskName );
 
@@ -37,7 +39,7 @@ void vApplicationStackOverflowHook( struct tskTaskControlBlock * xTask, char * p
     do                                         \
     {                                          \
         vTraceSignalDeadlineMiss();            \
-        vApplicationDeadlineMissHook();        \
+        vApplicationDeadlineMissHook( ( uint32_t ) ( uintptr_t ) pxCurrentTCB->pxTaskTag ); \
     } while( 0 )
 #define traceTASK_INCREMENT_TICK( xTickCount )    vTraceDeadlineMissTick()
 
