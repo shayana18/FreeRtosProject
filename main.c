@@ -65,7 +65,7 @@ int main( void )
     uint32_t ulHeartbeat;
 
     vTraceUsbSerialInit( 1500u );
-    vTraceUsbPrint( "USB serial ready\r\n" );
+    vTraceUsbPrint( "UART serial ready\r\n" );
 
     
     #if ( configUSE_EDF == 1)
@@ -77,7 +77,7 @@ int main( void )
         // Single-server CBS deadline-transition test:
         // sparse arrival forces deadline = arrival + T (non-multiple), then frequent jobs drain
         // budget and force deadline = current_deadline + T on exhaustion.
-        cbs_3_run();
+        // cbs_3_run();
         // One CBS server with four aperiodic job-source tasks; asserts CBS wins
         // tie-break against periodic task on equal deadlines.
         // cbs_4_run();

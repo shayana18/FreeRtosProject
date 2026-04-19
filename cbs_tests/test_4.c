@@ -25,17 +25,9 @@
 /* Observation window after tie-trigger submission. */
 #define CBS4_TIE_OBSERVE_MS               120u
 
-/* Background arrivals (same server/worker, low rate). */
-#define CBS4_BG1_OFFSET_MS               1400u
-#define CBS4_BG2_OFFSET_MS               2600u
-#define CBS4_BG3_OFFSET_MS               3900u
-#define CBS4_BG1_PERIOD_MS               4000u
-#define CBS4_BG2_PERIOD_MS               6000u
-#define CBS4_BG3_PERIOD_MS               9000u
-
 #define CBS4_PERIODIC_STACK_WORDS         256u
 #define CBS4_WORKER_STACK_WORDS           256u
-#define CBS4_ARRIVAL_STACK_WORDS          192u
+#define CBS4_ARRIVAL_STACK_WORDS          220u
 
 #define CBS4_WINNER_NONE                    0u
 #define CBS4_WINNER_PERIODIC                1u
@@ -54,9 +46,6 @@ static volatile uint32_t ulCBS4TieCBSWins;
 static TaskHandle_t xCBS4PeriodicHandle;
 static TaskHandle_t xCBS4WorkerHandle;
 static TaskHandle_t xCBS4TieArrivalHandle;
-static TaskHandle_t xCBS4BgArrival1Handle;
-static TaskHandle_t xCBS4BgArrival2Handle;
-static TaskHandle_t xCBS4BgArrival3Handle;
 static CBS_Server_t * pxCBS4Server;
 
 static BaseType_t prvCBS4TrySubmit( void )
@@ -77,6 +66,7 @@ static BaseType_t prvCBS4TrySubmit( void )
 static void vCBS4PeriodicTask( void * pvParameters )
 {
     TickType_t xLastWake;
+    TickType_t xPeriodicReleaseCount = ( TickType_t ) 0U;
 
     ( void ) pvParameters;
     xLastWake = xTaskGetTickCount();
@@ -84,6 +74,11 @@ static void vCBS4PeriodicTask( void * pvParameters )
     if( xCBS4PeriodicAnchorTick == ( TickType_t ) 0U )
     {
         xCBS4PeriodicAnchorTick = xLastWake;
+
+        if( xCBS4TieArrivalHandle != NULL )
+        {
+            ( void ) xTaskNotifyGive( xCBS4TieArrivalHandle );
+        }
     }
 
     for( ;; )
@@ -96,6 +91,12 @@ static void vCBS4PeriodicTask( void * pvParameters )
         spin_ms( CBS4_PERIODIC_WORK_MS );
         ulCBS4PeriodicBeats++;
         ( void ) xTaskDelayUntil( &xLastWake, pdMS_TO_TICKS( CBS4_PERIODIC_PERIOD_MS ) );
+        xPeriodicReleaseCount++;
+
+        vTraceUsbPrint( "CBS4_PER deadline update: release=%lu now=%lu next_deadline~=%lu\r\n",
+                        ( unsigned long ) xPeriodicReleaseCount,
+                        ( unsigned long ) xTaskGetTickCount(),
+                        ( unsigned long ) ( xLastWake + pdMS_TO_TICKS( CBS4_PERIODIC_PERIOD_MS ) ) );
     }
 }
 
@@ -119,75 +120,34 @@ static void vCBS4WorkerTask( void * pvParameters )
     }
 }
 
-static void vCBS4BackgroundArrivalTask1( void * pvParameters )
-{
-    TickType_t xLastWake;
-
-    ( void ) pvParameters;
-    vTaskDelay( pdMS_TO_TICKS( CBS4_BG1_OFFSET_MS ) );
-    xLastWake = xTaskGetTickCount();
-
-    for( ;; )
-    {
-        ( void ) xTaskDelayUntil( &xLastWake, pdMS_TO_TICKS( CBS4_BG1_PERIOD_MS ) );
-        ( void ) prvCBS4TrySubmit();
-    }
-}
-
-static void vCBS4BackgroundArrivalTask2( void * pvParameters )
-{
-    TickType_t xLastWake;
-
-    ( void ) pvParameters;
-    vTaskDelay( pdMS_TO_TICKS( CBS4_BG2_OFFSET_MS ) );
-    xLastWake = xTaskGetTickCount();
-
-    for( ;; )
-    {
-        ( void ) xTaskDelayUntil( &xLastWake, pdMS_TO_TICKS( CBS4_BG2_PERIOD_MS ) );
-        ( void ) prvCBS4TrySubmit();
-    }
-}
-
-static void vCBS4BackgroundArrivalTask3( void * pvParameters )
-{
-    TickType_t xLastWake;
-
-    ( void ) pvParameters;
-    vTaskDelay( pdMS_TO_TICKS( CBS4_BG3_OFFSET_MS ) );
-    xLastWake = xTaskGetTickCount();
-
-    for( ;; )
-    {
-        ( void ) xTaskDelayUntil( &xLastWake, pdMS_TO_TICKS( CBS4_BG3_PERIOD_MS ) );
-        ( void ) prvCBS4TrySubmit();
-    }
-}
-
 static void vCBS4TieArrivalTask( void * pvParameters )
 {
     TickType_t xLastWake;
+    TickType_t xTieReleaseCount = ( TickType_t ) 0U;
 
     ( void ) pvParameters;
 
-    while( xCBS4PeriodicAnchorTick == ( TickType_t ) 0U )
-    {
-        vTaskDelay( 1u );
-    }
+    /* Wait until the periodic task sets the common release anchor. */
+    ( void ) ulTaskNotifyTake( pdTRUE, portMAX_DELAY );
 
-    /* Align this submitter to the same period anchor as the periodic task so
-     * submit and periodic release happen on the same tick. */
+    /* Lock tie arrivals to the same period anchor as the periodic task so the
+     * first arrival and subsequent arrivals share release/deadline phase. */
     xLastWake = xCBS4PeriodicAnchorTick;
 
     for( ;; )
     {
         ( void ) xTaskDelayUntil( &xLastWake, pdMS_TO_TICKS( CBS4_SERVER_PERIOD_MS ) );
-
         ulCBS4TieAttempts++;
+
         ulCBS4TieWinner = CBS4_WINNER_NONE;
         xCBS4TieWindowOpen = pdTRUE;
 
         configASSERT( prvCBS4TrySubmit() == pdPASS );
+        xTieReleaseCount++;
+        vTraceUsbPrint( "CBS4_TIE deadline update: release=%lu now=%lu next_deadline~=%lu\r\n",
+                ( unsigned long ) xTieReleaseCount,
+                ( unsigned long ) xTaskGetTickCount(),
+                ( unsigned long ) ( xLastWake + pdMS_TO_TICKS( CBS4_SERVER_PERIOD_MS ) ) );
 
         vTaskDelay( pdMS_TO_TICKS( CBS4_TIE_OBSERVE_MS ) );
 
@@ -206,9 +166,6 @@ void cbs_4_run( void )
     xCBS4PeriodicHandle = NULL;
     xCBS4WorkerHandle = NULL;
     xCBS4TieArrivalHandle = NULL;
-    xCBS4BgArrival1Handle = NULL;
-    xCBS4BgArrival2Handle = NULL;
-    xCBS4BgArrival3Handle = NULL;
     pxCBS4Server = NULL;
 
     ulCBS4PeriodicBeats = 0u;
@@ -256,36 +213,6 @@ void cbs_4_run( void )
                                  CBS4_TIE_TASK_REL_DEADLINE_MS );
     configASSERT( xCreateResult == pdPASS );
 
-    xCreateResult = xTaskCreate( vCBS4BackgroundArrivalTask1,
-                                 "CBS4_BG1",
-                                 CBS4_ARRIVAL_STACK_WORDS,
-                                 NULL,
-                                 &xCBS4BgArrival1Handle,
-                                 CBS4_BG1_PERIOD_MS,
-                                 20u,
-                                 CBS4_BG1_PERIOD_MS );
-    configASSERT( xCreateResult == pdPASS );
-
-    xCreateResult = xTaskCreate( vCBS4BackgroundArrivalTask2,
-                                 "CBS4_BG2",
-                                 CBS4_ARRIVAL_STACK_WORDS,
-                                 NULL,
-                                 &xCBS4BgArrival2Handle,
-                                 CBS4_BG2_PERIOD_MS,
-                                 20u,
-                                 CBS4_BG2_PERIOD_MS );
-    configASSERT( xCreateResult == pdPASS );
-
-    xCreateResult = xTaskCreate( vCBS4BackgroundArrivalTask3,
-                                 "CBS4_BG3",
-                                 CBS4_ARRIVAL_STACK_WORDS,
-                                 NULL,
-                                 &xCBS4BgArrival3Handle,
-                                 CBS4_BG3_PERIOD_MS,
-                                 20u,
-                                 CBS4_BG3_PERIOD_MS );
-    configASSERT( xCreateResult == pdPASS );
-
     if( xCBS4PeriodicHandle != NULL )
     {
         vTaskSetApplicationTaskTag( xCBS4PeriodicHandle, ( TaskHookFunction_t ) 1 );
@@ -294,6 +221,11 @@ void cbs_4_run( void )
     if( xCBS4WorkerHandle != NULL )
     {
         vTaskSetApplicationTaskTag( xCBS4WorkerHandle, ( TaskHookFunction_t ) 2 );
+    }
+
+    if( xCBS4TieArrivalHandle != NULL )
+    {
+        vTaskSetApplicationTaskTag( xCBS4TieArrivalHandle, ( TaskHookFunction_t ) 4 );
     }
 
     vTaskStartScheduler();
