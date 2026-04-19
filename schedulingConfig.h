@@ -8,7 +8,7 @@
 #define configUSE_SRP 0
 #define configUSE_CBS 0
 // MP scheduling config
-#define GLOBAL_EDF_ENABLE 1
+#define GLOBAL_EDF_ENABLE 1U
 #define PARTITIONED_EDF_ENABLE 0
 
 #if ( configUSE_UP == 1U ) && ( configUSE_MP == 1U )

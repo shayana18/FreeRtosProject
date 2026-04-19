@@ -51,12 +51,17 @@ file(GLOB CBS_TEST_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_LIST_DIR}/cbs_tests/*.c
 )
 
+file(GLOB_RECURSE MP_TEST_SOURCES CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_LIST_DIR}/mp_tests/*.c
+)
+
 # Add executable. Default name is the project name, version 0.1
 add_executable(${PROJECT_NAME}
     main.c
     ${EDF_TEST_SOURCES}
     ${SRP_TEST_SOURCES}
     ${CBS_TEST_SOURCES}
+    ${MP_TEST_SOURCES}
     task_trace.c
     test_utils.c
     cbs.c

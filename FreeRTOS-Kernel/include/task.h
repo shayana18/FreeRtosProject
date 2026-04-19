@@ -430,7 +430,33 @@ typedef enum
  */
 #if ( configSUPPORT_DYNAMIC_ALLOCATION == 1 )
     #if ( configUSE_EDF == 1 )
-        #if ( ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) ) /* SRP tasks as SRP can only work on top of EDF. */
+
+        #if ( ( configUSE_UP == 1U ) && ( configUSE_MP == 0U ) )
+
+            #if ( configUSE_SRP == 1U )
+                BaseType_t xTaskCreate( TaskFunction_t pxTaskCode,
+                                        const char * const pcName,
+                                        const configSTACK_DEPTH_TYPE uxStackDepth,
+                                        void * const pvParameters,
+                                        TaskHandle_t * const pxCreatedTask,
+                                        uint32_t ulPeriodMs,
+                                        uint32_t ulWcetMs,
+                                        uint32_t ulRelDeadlineMs,
+                                        const SRPResourceClaim_t * const pxResourceClaims,
+                                        UBaseType_t uxClaimedSemaphoreCount ) PRIVILEGED_FUNCTION;
+            #else // base UP EDF
+                BaseType_t xTaskCreate( TaskFunction_t pxTaskCode,
+                                        const char * const pcName,
+                                        const configSTACK_DEPTH_TYPE uxStackDepth,
+                                        void * const pvParameters,
+                                        TaskHandle_t * const pxCreatedTask,
+                                        uint32_t ulPeriodMs,
+                                        uint32_t ulWcetMs,
+                                        uint32_t ulRelDeadlineMs ) PRIVILEGED_FUNCTION;
+            #endif
+
+        #elif ( ( configUSE_MP == 1U ) && ( configUSE_UP == 0U ) ) //EDF for MP (need to handle coreAffinity)
+
             BaseType_t xTaskCreate( TaskFunction_t pxTaskCode,
                                     const char * const pcName,
                                     const configSTACK_DEPTH_TYPE uxStackDepth,
@@ -439,19 +465,10 @@ typedef enum
                                     uint32_t ulPeriodMs,
                                     uint32_t ulWcetMs,
                                     uint32_t ulRelDeadlineMs,
-                                    const SRPResourceClaim_t * const pxResourceClaims,
-                                    UBaseType_t uxClaimedSemaphoreCount ) PRIVILEGED_FUNCTION;
-        #else // EDF tasks (no SRP)
-            BaseType_t xTaskCreate( TaskFunction_t pxTaskCode,
-                                    const char * const pcName,
-                                    const configSTACK_DEPTH_TYPE uxStackDepth,
-                                    void * const pvParameters,
-                                    TaskHandle_t * const pxCreatedTask,
-                                    uint32_t ulPeriodMs,
-                                    uint32_t ulWcetMs,
-                                    uint32_t ulRelDeadlineMs ) PRIVILEGED_FUNCTION;
+                                    UBaseType_t uxCoreAffinityMask ) PRIVILEGED_FUNCTION;
         #endif
-    #else // falling back to fixed priority
+
+    #else
         BaseType_t xTaskCreate( TaskFunction_t pxTaskCode,
                                 const char * const pcName,
                                 const configSTACK_DEPTH_TYPE uxStackDepth,

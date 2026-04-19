@@ -8,7 +8,7 @@ The system would run the first few SRP jobs correctly, then appear to stop resch
 ### What was actually going wrong
 The SRP tick-accounting path assumed that any task in the SRP registry list was a periodic SRP task. That assumption was false.
 
-Internal zero-period tasks, including the idle task, were also being inserted into `xSRPTaskRegistryList`. For those tasks:
+Internal zero-period tasks, including the idle task, were also being inserted into `xSRPTaskRegistryList_UP`. For those tasks:
 
 - `xPeriodTicks = 0`
 - `xWcetTicks = 0`
@@ -26,7 +26,7 @@ Intuitively: the kernel accidentally asked, "when is the idle task's next period
 ### Fix
 We made the SRP bookkeeping mirror the EDF bookkeeping:
 
-1. Only periodic SRP tasks are inserted into `xSRPTaskRegistryList`.
+1. Only periodic SRP tasks are inserted into `xSRPTaskRegistryList_UP`.
 2. The SRP tick path only performs periodic runtime accounting when `xPeriodTicks != 0`.
 3. `prvPeriodicTaskNextReleaseAfter()` now asserts that it is only called for a real periodic task.
 

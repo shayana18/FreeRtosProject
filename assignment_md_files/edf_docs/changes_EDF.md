@@ -8,8 +8,8 @@
 - Added EDF admission control at task creation time.
 - Used utilization-based admission for implicit-deadline task sets.
 - Used processor-demand analysis for constrained-deadline task sets.
-- Added `xReadyEDFTasksList` as a ready queue sorted by absolute deadline.
-- Added `xEDFTaskRegistryList` to keep track of all EDF tasks for admission control and periodic release metadata updates.
+- Added `xReadyEDFTasksList_UP` as a ready queue sorted by absolute deadline.
+- Added `xEDFTaskRegistryList_UP` to keep track of all EDF tasks for admission control and periodic release metadata updates.
 - Updated task-list initialization so the EDF ready list and EDF registry list are initialized with the rest of the kernel lists.
 - Changed `prvAddTaskToReadyList` so EDF tasks are inserted into the EDF ready list in ascending order of absolute deadline instead of into fixed-priority ready queues.
 - Modified `vTaskSwitchContext()` so EDF mode selects the head of the EDF ready list as the next running task.

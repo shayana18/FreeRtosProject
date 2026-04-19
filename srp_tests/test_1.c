@@ -1,6 +1,6 @@
 #include "srp_tests/test_1.h"
 
-#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+#if ( (configUSE_UP == 1) && ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
 
 #include <stdint.h>
 
