@@ -67,11 +67,19 @@ typedef struct MPAdmissionTaskConfig
     uint32_t ulPeriodMs;
     uint32_t ulWcetMs;
     UBaseType_t uxCoreAffinityMask;
+    uint32_t ulAnchorSource;
 } MPAdmissionTaskConfig_t;
+
+#define MP_ANCHOR_SOURCE_STARTUP    0u
+#define MP_ANCHOR_SOURCE_BAD        1u
+#define MP_ANCHOR_SOURCE_GOOD       2u
 
 static volatile BaseType_t xBadCreateResultInitial = pdFAIL;
 static volatile BaseType_t xBadCreateResultAfter10s = pdFAIL;
 static volatile BaseType_t xGoodCreateResultAfter10s = pdFAIL;
+static TickType_t xMpAdmissionSharedAnchorTick = 0u;
+static TickType_t xMpAdmissionBadReleaseAnchorTick = 0u;
+static TickType_t xMpAdmissionGoodReleaseAnchorTick = 0u;
 
 static void vMPAdmissionPeriodicTask( void * pvParameters )
 {
@@ -81,7 +89,18 @@ static void vMPAdmissionPeriodicTask( void * pvParameters )
 
     configASSERT( pxCfg != NULL );
 
-    xLastWakeTime = xTaskGetTickCount();
+    if( pxCfg->ulAnchorSource == MP_ANCHOR_SOURCE_BAD )
+    {
+        xLastWakeTime = xMpAdmissionBadReleaseAnchorTick;
+    }
+    else if( pxCfg->ulAnchorSource == MP_ANCHOR_SOURCE_GOOD )
+    {
+        xLastWakeTime = xMpAdmissionGoodReleaseAnchorTick;
+    }
+    else
+    {
+        xLastWakeTime = xMpAdmissionSharedAnchorTick;
+    }
 
     for( ;; )
     {
@@ -107,12 +126,14 @@ static void vMPAdmissionControllerTask( void * pvParameters )
         static const MPAdmissionTaskConfig_t xBadTaskCfg =
         {
             .pcName = "MP Bad",
-            .ulTag = 0u,
+            .ulTag = 6u,
             .ulPeriodMs = BAD_PERIOD_MS,
             .ulWcetMs = BAD_WCET_MS,
-            .uxCoreAffinityMask = tskNO_AFFINITY
+            .uxCoreAffinityMask = tskNO_AFFINITY,
+            .ulAnchorSource = MP_ANCHOR_SOURCE_BAD
         };
         TaskHandle_t xBadHandle = NULL;
+        xMpAdmissionBadReleaseAnchorTick = xTaskGetTickCount();
         xBadCreateResultAfter10s =
             xTaskCreate( vMPAdmissionPeriodicTask,
                          xBadTaskCfg.pcName,
@@ -132,9 +153,11 @@ static void vMPAdmissionControllerTask( void * pvParameters )
             .ulTag = 4u,
             .ulPeriodMs = GOOD_PERIOD_MS,
             .ulWcetMs = GOOD_WCET_MS,
-            .uxCoreAffinityMask = tskNO_AFFINITY
+            .uxCoreAffinityMask = tskNO_AFFINITY,
+            .ulAnchorSource = MP_ANCHOR_SOURCE_GOOD
         };
         TaskHandle_t xGoodHandle = NULL;
+        xMpAdmissionGoodReleaseAnchorTick = xTaskGetTickCount();
 
         xGoodCreateResultAfter10s =
             xTaskCreate( vMPAdmissionPeriodicTask,
@@ -168,7 +191,8 @@ void mp_edf_admission_1_run( void )
         .ulTag = 1u,
         .ulPeriodMs = BASE1_PERIOD_MS,
         .ulWcetMs = BASE1_WCET_MS,
-        .uxCoreAffinityMask = tskNO_AFFINITY
+        .uxCoreAffinityMask = tskNO_AFFINITY,
+        .ulAnchorSource = MP_ANCHOR_SOURCE_STARTUP
     };
     static const MPAdmissionTaskConfig_t xBase2Cfg =
     {
@@ -176,13 +200,15 @@ void mp_edf_admission_1_run( void )
         .ulTag = 2u,
         .ulPeriodMs = BASE2_PERIOD_MS,
         .ulWcetMs = BASE2_WCET_MS,
-        .uxCoreAffinityMask = tskNO_AFFINITY
+        .uxCoreAffinityMask = tskNO_AFFINITY,
+        .ulAnchorSource = MP_ANCHOR_SOURCE_STARTUP
     };
     TaskHandle_t xBase1Handle = NULL;
     TaskHandle_t xBase2Handle = NULL;
 
     stdio_init_all();
     vTraceTaskPinsInit();
+    xMpAdmissionSharedAnchorTick = xTaskGetTickCount();
 
     ( void ) xTaskCreate( vMPAdmissionPeriodicTask,
                           xBase1Cfg.pcName,
@@ -220,12 +246,14 @@ void mp_edf_admission_1_run( void )
         static const MPAdmissionTaskConfig_t xBadTaskCfg =
         {
             .pcName = "MP Bad",
-            .ulTag = 0u,
+            .ulTag = 6u,
             .ulPeriodMs = BAD_PERIOD_MS,
             .ulWcetMs = BAD_WCET_MS,
-            .uxCoreAffinityMask = tskNO_AFFINITY
+            .uxCoreAffinityMask = tskNO_AFFINITY,
+            .ulAnchorSource = MP_ANCHOR_SOURCE_BAD
         };
         TaskHandle_t xBadHandle = NULL;
+        xMpAdmissionBadReleaseAnchorTick = xTaskGetTickCount();
 
         xBadCreateResultInitial =
             xTaskCreate( vMPAdmissionPeriodicTask,

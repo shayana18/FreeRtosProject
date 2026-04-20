@@ -38,6 +38,8 @@ typedef struct MPPartBasicTaskConfig
     UBaseType_t uxCoreAffinityMask;
 } MPPartBasicTaskConfig_t;
 
+static TickType_t xMpPart1SharedAnchorTick = 0u;
+
 static void vMPPartBasicTask( void * pvParameters )
 {
     const MPPartBasicTaskConfig_t * pxCfg = ( const MPPartBasicTaskConfig_t * ) pvParameters;
@@ -46,7 +48,7 @@ static void vMPPartBasicTask( void * pvParameters )
 
     configASSERT( pxCfg != NULL );
 
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xMpPart1SharedAnchorTick;
 
     for( ;; )
     {
@@ -74,6 +76,7 @@ void mp_partitioned_edf_1_run( void )
 
     stdio_init_all();
     vTraceTaskPinsInit();
+    xMpPart1SharedAnchorTick = xTaskGetTickCount();
 
     for( uxIndex = 0u; uxIndex < ( UBaseType_t ) ( sizeof( xTaskCfgs ) / sizeof( xTaskCfgs[ 0 ] ) ); uxIndex++ )
     {

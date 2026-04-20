@@ -40,6 +40,8 @@ typedef struct MPGlobMigrationTaskConfig
     UBaseType_t uxCoreAffinityMask;
 } MPGlobMigrationTaskConfig_t;
 
+static TickType_t xMpGlob3SharedAnchorTick = 0u;
+
 static void vMPGlobMigrationTask( void * pvParameters )
 {
     const MPGlobMigrationTaskConfig_t * pxCfg = ( const MPGlobMigrationTaskConfig_t * ) pvParameters;
@@ -53,7 +55,7 @@ static void vMPGlobMigrationTask( void * pvParameters )
         vTaskDelay( pdMS_TO_TICKS( pxCfg->ulInitialDelayMs ) );
     }
 
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xMpGlob3SharedAnchorTick + pdMS_TO_TICKS( pxCfg->ulInitialDelayMs );
 
     for( ;; )
     {
@@ -81,6 +83,7 @@ void mp_global_edf_3_run( void )
 
     stdio_init_all();
     vTraceTaskPinsInit();
+    xMpGlob3SharedAnchorTick = xTaskGetTickCount();
 
     for( uxIndex = 0u; uxIndex < ( UBaseType_t ) ( sizeof( xTaskCfgs ) / sizeof( xTaskCfgs[ 0 ] ) ); uxIndex++ )
     {

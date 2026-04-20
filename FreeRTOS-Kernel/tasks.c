@@ -2394,6 +2394,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
         }
     #endif
 
+    #if ( ( configUSE_MP == 1U ) && ( configUSE_UP == 0U ) )
         #if ( PARTITIONED_EDF_ENABLE == 1U )
             static BaseType_t prvPartEDFCoreFromAffinityMask( UBaseType_t uxCoreAffinityMask )
             {
@@ -2597,8 +2598,8 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                 return ( ullUtotalQ32 <= ullUtilBoundQ32 ) ? pdTRUE : pdFALSE;
             }
         /*-----------------------------------------------------------*/
-            #endif
-    #endif
+                #endif
+            #endif /* ( configUSE_MP == 1U ) && ( configUSE_UP == 0U ) */
 /*-----------------------------------------------------------*/
 
 
@@ -3590,6 +3591,8 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
         }
 
     #endif /* ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) */
+
+#endif /* configUSE_EDF == 1 */
 /*-----------------------------------------------------------*/
 
 #if ( configSUPPORT_DYNAMIC_ALLOCATION == 1 )

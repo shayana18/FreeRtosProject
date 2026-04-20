@@ -1,6 +1,6 @@
 
 // Uniprocessing vs multiprocessing selection
-#define configUSE_UP  0
+#define configUSE_UP  0U
 #define configUSE_MP  1U
 // EDF selection (if not use stock FP implementation for UP and MP)
 #define configUSE_EDF 1U

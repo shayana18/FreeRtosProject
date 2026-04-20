@@ -1,6 +1,6 @@
 #include "mp_tests/global_edf_tests/test_1.h"
 
-#if ( ( configUSE_MP == 1 ) && ( configUSE_UP == 0 ) && ( configUSE_EDF == 1 ) && ( PARTITIONED_EDF_ENABLE == 0U ) )
+#if ( ( configUSE_MP == 1 ) && ( configUSE_UP == 0 ) && ( configUSE_EDF == 1 ) && ( GLOBAL_EDF_ENABLE == 1U ) )
 
 #include <stdint.h>
 #include <stdio.h>
@@ -29,6 +29,8 @@
 
 #define GLOB1_STACK_DEPTH     256u
 
+static TickType_t xGlob1SharedAnchorTick = 0;
+
 typedef struct MPGlobBasicTaskConfig
 {
     const char * pcName;
@@ -45,7 +47,7 @@ static void vMPGlobBasicTask( void * pvParameters )
 
     configASSERT( pxCfg != NULL );
 
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xGlob1SharedAnchorTick;
 
     for( ;; )
     {
@@ -73,6 +75,7 @@ void mp_global_edf_1_run( void )
 
     stdio_init_all();
     vTraceTaskPinsInit();
+    xGlob1SharedAnchorTick = xTaskGetTickCount();
 
     for( uxIndex = 0u; uxIndex < ( UBaseType_t ) ( sizeof( xTaskCfgs ) / sizeof( xTaskCfgs[ 0 ] ) ); uxIndex++ )
     {

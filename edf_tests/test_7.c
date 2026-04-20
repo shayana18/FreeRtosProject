@@ -51,6 +51,8 @@
 #define GOOD_WCET_MS        5000u
 #define GOOD_DEADLINE_MS    GOOD_PERIOD_MS
 
+static TickType_t xEdf7SharedAnchorTick = 0u;
+
 static volatile BaseType_t xBadCreateResult = pdFAIL;
 static volatile BaseType_t xGoodCreateResult = pdFAIL;
 
@@ -60,7 +62,7 @@ static void BaselineTask1( void * pvParameters )
     BaseType_t xDelayResult;
 
     ( void ) pvParameters;
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xEdf7SharedAnchorTick;
 
     for( ;; )
     {
@@ -81,7 +83,7 @@ static void BaselineTask2( void * pvParameters )
     BaseType_t xDelayResult;
 
     ( void ) pvParameters;
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xEdf7SharedAnchorTick;
 
     for( ;; )
     {
@@ -102,7 +104,7 @@ static void BadTask( void * pvParameters )
     BaseType_t xDelayResult;
 
     ( void ) pvParameters;
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xEdf7SharedAnchorTick;
 
     for( ;; )
     {
@@ -123,7 +125,7 @@ static void GoodTask( void * pvParameters )
     BaseType_t xDelayResult;
 
     ( void ) pvParameters;
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xEdf7SharedAnchorTick;
 
     for( ;; )
     {
@@ -142,6 +144,7 @@ void edf_7_run( void )
 {
     stdio_init_all();
     vTraceTaskPinsInit();
+    xEdf7SharedAnchorTick = xTaskGetTickCount();
 
     TaskHandle_t xB1 = NULL;
     TaskHandle_t xB2 = NULL;

@@ -1,9 +1,11 @@
 #include <stdint.h>
+#include <stdio.h>
 
 #include "schedulingConfig.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include "task_trace.h"
+#include "pico/stdlib.h"
 
 #if ( configUSE_EDF == 1 )
     #if ( ( configUSE_UP == 1 ) && ( configUSE_MP == 0 ) )
@@ -73,6 +75,7 @@ static void vApplicationFirstDeadlineMissCaptured( void ) __attribute__( ( noinl
 
 int main( void )
 {
+    stdio_init_all();
     
     #if ( configUSE_EDF == 1 )
         #if ( ( configUSE_UP == 1 ) && ( configUSE_MP == 0 ) )
@@ -88,7 +91,7 @@ int main( void )
             // srp_4_run();
             // srp_5_run();
             // srp_6_run();
-            #elif ( configUSE_SRP == 0 && configUSE_CBS == 0 )
+            #elif ( configUSE_SRP == 0 && configUSE_CBS == 0  && GLOBAL_EDF_ENABLE == 0U && PARTITIONED_EDF_ENABLE == 0U )
             // Simple edf implicit deadlinetest case with 3 tasks added at startup with a fairly low utilization.
             // edf_1_run();
 
@@ -96,7 +99,7 @@ int main( void )
             // edf_2_run();
 
             // EDF admission control test, attempts to add unschedulable task at startup and after 10s, then adds a schedulable task.
-            // edf_3_run();
+            edf_3_run();
 
             // Constrained deadline EDF test with 3 tasks (D != T).
             // edf_4_run();
@@ -114,7 +117,7 @@ int main( void )
             // edf_8_run();
             #endif
         #elif ( ( configUSE_MP == 1 ) && ( configUSE_UP == 0 ) )
-            #if ( PARTITIONED_EDF_ENABLE == 0U )
+            #if ( GLOBAL_EDF_ENABLE == 1U )
             // Global EDF basic dispatch: two earliest-deadline jobs should occupy the two cores.
             // mp_global_edf_1_run();
 
@@ -135,7 +138,7 @@ int main( void )
             // mp_edf_admission_1_run();
 
             // MP EDF run-time task creation for the active MP scheduling mode.
-            // mp_edf_runtime_create_1_run();
+            mp_edf_runtime_create_1_run();
         #endif
     #endif
 
@@ -160,6 +163,11 @@ void vApplicationStackOverflowHook( TaskHandle_t xTask,
     for( ;; )
     {
     }
+}
+
+void vApplicationIdleHook( void )
+{
+    /* Must not block; keep empty unless adding non-blocking diagnostics. */
 }
 
 void vApplicationDeadlineMissHook( void )

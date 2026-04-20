@@ -38,6 +38,8 @@ typedef struct MPGlobPreemptTaskConfig
     uint32_t ulInitialDelayMs;
 } MPGlobPreemptTaskConfig_t;
 
+static TickType_t xMpGlob2SharedAnchorTick = 0u;
+
 static void vMPGlobPreemptTask( void * pvParameters )
 {
     const MPGlobPreemptTaskConfig_t * pxCfg = ( const MPGlobPreemptTaskConfig_t * ) pvParameters;
@@ -51,7 +53,7 @@ static void vMPGlobPreemptTask( void * pvParameters )
         vTaskDelay( pdMS_TO_TICKS( pxCfg->ulInitialDelayMs ) );
     }
 
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xMpGlob2SharedAnchorTick + pdMS_TO_TICKS( pxCfg->ulInitialDelayMs );
 
     for( ;; )
     {
@@ -79,6 +81,7 @@ void mp_global_edf_2_run( void )
 
     stdio_init_all();
     vTraceTaskPinsInit();
+    xMpGlob2SharedAnchorTick = xTaskGetTickCount();
 
     for( uxIndex = 0u; uxIndex < ( UBaseType_t ) ( sizeof( xTaskCfgs ) / sizeof( xTaskCfgs[ 0 ] ) ); uxIndex++ )
     {

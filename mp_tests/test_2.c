@@ -66,10 +66,18 @@ typedef struct MPRuntimeTaskConfig
     uint32_t ulPeriodMs;
     uint32_t ulWcetMs;
     UBaseType_t uxCoreAffinityMask;
+    uint32_t ulAnchorSource;
 } MPRuntimeTaskConfig_t;
+
+#define MP_RUNTIME_ANCHOR_SOURCE_STARTUP    0u
+#define MP_RUNTIME_ANCHOR_SOURCE_BAD        1u
+#define MP_RUNTIME_ANCHOR_SOURCE_GOOD       2u
 
 static volatile BaseType_t xGoodRuntimeCreateResult = pdFAIL;
 static volatile BaseType_t xBadRuntimeCreateResult = pdFAIL;
+static TickType_t xMpRuntimeSharedAnchorTick = 0u;
+static TickType_t xMpRuntimeBadReleaseAnchorTick = 0u;
+static TickType_t xMpRuntimeGoodReleaseAnchorTick = 0u;
 
 static void vMPRuntimePeriodicTask( void * pvParameters )
 {
@@ -79,7 +87,18 @@ static void vMPRuntimePeriodicTask( void * pvParameters )
 
     configASSERT( pxCfg != NULL );
 
-    xLastWakeTime = xTaskGetTickCount();
+    if( pxCfg->ulAnchorSource == MP_RUNTIME_ANCHOR_SOURCE_BAD )
+    {
+        xLastWakeTime = xMpRuntimeBadReleaseAnchorTick;
+    }
+    else if( pxCfg->ulAnchorSource == MP_RUNTIME_ANCHOR_SOURCE_GOOD )
+    {
+        xLastWakeTime = xMpRuntimeGoodReleaseAnchorTick;
+    }
+    else
+    {
+        xLastWakeTime = xMpRuntimeSharedAnchorTick;
+    }
 
     for( ;; )
     {
@@ -108,9 +127,11 @@ static void vMPRuntimeControllerTask( void * pvParameters )
             .ulTag = 4u,
             .ulPeriodMs = GOOD_PERIOD_MS,
             .ulWcetMs = GOOD_WCET_MS,
-            .uxCoreAffinityMask = tskNO_AFFINITY
+            .uxCoreAffinityMask = tskNO_AFFINITY,
+            .ulAnchorSource = MP_RUNTIME_ANCHOR_SOURCE_GOOD
         };
         TaskHandle_t xGoodHandle = NULL;
+        xMpRuntimeGoodReleaseAnchorTick = xTaskGetTickCount();
 
         xGoodRuntimeCreateResult =
             xTaskCreate( vMPRuntimePeriodicTask,
@@ -136,12 +157,14 @@ static void vMPRuntimeControllerTask( void * pvParameters )
         static const MPRuntimeTaskConfig_t xBadTaskCfg =
         {
             .pcName = "MP Run Bad",
-            .ulTag = 0u,
+            .ulTag = 6u,
             .ulPeriodMs = BAD_PERIOD_MS,
             .ulWcetMs = BAD_WCET_MS,
-            .uxCoreAffinityMask = tskNO_AFFINITY
+            .uxCoreAffinityMask = tskNO_AFFINITY,
+            .ulAnchorSource = MP_RUNTIME_ANCHOR_SOURCE_BAD
         };
         TaskHandle_t xBadHandle = NULL;
+        xMpRuntimeBadReleaseAnchorTick = xTaskGetTickCount();
         xBadRuntimeCreateResult =
             xTaskCreate( vMPRuntimePeriodicTask,
                          xBadTaskCfg.pcName,
@@ -168,7 +191,8 @@ void mp_edf_runtime_create_1_run( void )
         .ulTag = 1u,
         .ulPeriodMs = BASE1_PERIOD_MS,
         .ulWcetMs = BASE1_WCET_MS,
-        .uxCoreAffinityMask = tskNO_AFFINITY
+        .uxCoreAffinityMask = tskNO_AFFINITY,
+        .ulAnchorSource = MP_RUNTIME_ANCHOR_SOURCE_STARTUP
     };
     static const MPRuntimeTaskConfig_t xBase2Cfg =
     {
@@ -176,7 +200,8 @@ void mp_edf_runtime_create_1_run( void )
         .ulTag = 2u,
         .ulPeriodMs = BASE2_PERIOD_MS,
         .ulWcetMs = BASE2_WCET_MS,
-        .uxCoreAffinityMask = tskNO_AFFINITY
+        .uxCoreAffinityMask = tskNO_AFFINITY,
+        .ulAnchorSource = MP_RUNTIME_ANCHOR_SOURCE_STARTUP
     };
     TaskHandle_t xBase1Handle = NULL;
     TaskHandle_t xBase2Handle = NULL;
@@ -184,6 +209,7 @@ void mp_edf_runtime_create_1_run( void )
 
     stdio_init_all();
     vTraceTaskPinsInit();
+    xMpRuntimeSharedAnchorTick = xTaskGetTickCount();
 
     ( void ) xTaskCreate( vMPRuntimePeriodicTask,
                           xBase1Cfg.pcName,

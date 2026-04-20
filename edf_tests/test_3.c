@@ -34,6 +34,10 @@
 #define GOOD_PERIOD_MS  8000u
 #define GOOD_WCET_MS    400u
 
+static TickType_t xEdf3SharedAnchorTick = 0u;
+static TickType_t xBadTaskReleaseAnchorTick = 0u;
+static TickType_t xGoodTaskReleaseAnchorTick = 0u;
+
 static volatile BaseType_t xBadCreateResultInitial = pdFAIL;
 static volatile BaseType_t xBadCreateResultAfter10s = pdFAIL;
 static volatile BaseType_t xGoodCreateResultAfter10s = pdFAIL;
@@ -44,7 +48,7 @@ static void BaselineTask1(void *pvParameters)
     BaseType_t xDelayResult;
 
     (void) pvParameters;
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xEdf3SharedAnchorTick;
 
     for (;;)
     {
@@ -65,7 +69,7 @@ static void BaselineTask2(void *pvParameters)
     BaseType_t xDelayResult;
 
     (void) pvParameters;
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xEdf3SharedAnchorTick;
 
     for (;;)
     {
@@ -86,7 +90,7 @@ static void BaselineTask3(void *pvParameters)
     BaseType_t xDelayResult;
 
     (void) pvParameters;
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xEdf3SharedAnchorTick;
 
     for (;;)
     {
@@ -107,7 +111,7 @@ static void BadTask(void *pvParameters)
     BaseType_t xDelayResult;
 
     (void) pvParameters;
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xBadTaskReleaseAnchorTick;
 
     for (;;)
     {
@@ -128,7 +132,7 @@ static void GoodTask(void *pvParameters)
     BaseType_t xDelayResult;
 
     (void) pvParameters;
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xGoodTaskReleaseAnchorTick;
 
     for (;;)
     {
@@ -152,6 +156,7 @@ static void AdmissionControllerTask(void *pvParameters)
 
     {
         TaskHandle_t xBadHandle = NULL;
+        xBadTaskReleaseAnchorTick = xTaskGetTickCount();
         xBadCreateResultAfter10s = xTaskCreate(BadTask, "Bad Task", 256, NULL, &xBadHandle, BAD_PERIOD_MS, BAD_WCET_MS, BAD_PERIOD_MS);
         if( ( xBadCreateResultAfter10s == pdPASS ) && ( xBadHandle != NULL ) )
         {
@@ -161,6 +166,7 @@ static void AdmissionControllerTask(void *pvParameters)
 
     {
         TaskHandle_t xGoodHandle = NULL;
+        xGoodTaskReleaseAnchorTick = xTaskGetTickCount();
         xGoodCreateResultAfter10s = xTaskCreate(GoodTask, "Good Task", 256, NULL, &xGoodHandle, GOOD_PERIOD_MS, GOOD_WCET_MS, GOOD_PERIOD_MS);
         if( ( xGoodCreateResultAfter10s == pdPASS ) && ( xGoodHandle != NULL ) )
         {
@@ -178,6 +184,7 @@ void edf_3_run(void)
 {
     stdio_init_all();
     vTraceTaskPinsInit();
+    xEdf3SharedAnchorTick = xTaskGetTickCount();
 
     TaskHandle_t xB1 = NULL;
     TaskHandle_t xB2 = NULL;
@@ -194,6 +201,7 @@ void edf_3_run(void)
     /* Attempt to add an unschedulable task at the end (expected to fail). */
     {
         TaskHandle_t xBadHandle = NULL;
+        xBadTaskReleaseAnchorTick = xTaskGetTickCount();
         xBadCreateResultInitial = xTaskCreate(BadTask, "Bad Task", 256, NULL, &xBadHandle, BAD_PERIOD_MS, BAD_WCET_MS, BAD_PERIOD_MS);
     }
 

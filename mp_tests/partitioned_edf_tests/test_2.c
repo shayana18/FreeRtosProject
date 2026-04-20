@@ -42,6 +42,7 @@ typedef struct MPPartMigrationTaskConfig
 } MPPartMigrationTaskConfig_t;
 
 static TaskHandle_t xMigratingTaskHandle = NULL;
+static TickType_t xMpPart2SharedAnchorTick = 0u;
 
 static void vMPPartMigrationTask( void * pvParameters )
 {
@@ -51,7 +52,7 @@ static void vMPPartMigrationTask( void * pvParameters )
 
     configASSERT( pxCfg != NULL );
 
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xMpPart2SharedAnchorTick;
 
     for( ;; )
     {
@@ -116,6 +117,7 @@ void mp_partitioned_edf_2_run( void )
 
     stdio_init_all();
     vTraceTaskPinsInit();
+    xMpPart2SharedAnchorTick = xTaskGetTickCount();
 
     ( void ) xTaskCreate( vMPPartMigrationTask,
                           xMigratingCfg.pcName,

@@ -48,6 +48,8 @@
 #define GOOD_WCET_MS        3200u
 #define GOOD_DEADLINE_MS    6400u /* Increased relative deadline so the candidate passes the DBF test. */
 
+static TickType_t xEdf6SharedAnchorTick = 0u;
+
 static volatile BaseType_t xBadCreateResultInitial = pdFAIL;
 static volatile BaseType_t xBadCreateResultAfter10s = pdFAIL;
 static volatile BaseType_t xGoodCreateResultAfter10s = pdFAIL;
@@ -58,7 +60,7 @@ static void BaselineTask1(void *pvParameters)
     BaseType_t xDelayResult;
 
     (void) pvParameters;
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xEdf6SharedAnchorTick;
 
     for (;;)
     {
@@ -79,7 +81,7 @@ static void BaselineTask2(void *pvParameters)
     BaseType_t xDelayResult;
 
     (void) pvParameters;
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xEdf6SharedAnchorTick;
 
     for (;;)
     {
@@ -100,7 +102,7 @@ static void BadTask(void *pvParameters)
     BaseType_t xDelayResult;
 
     (void) pvParameters;
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xEdf6SharedAnchorTick;
 
     for (;;)
     {
@@ -121,7 +123,7 @@ static void GoodTask(void *pvParameters)
     BaseType_t xDelayResult;
 
     (void) pvParameters;
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xEdf6SharedAnchorTick;
 
     for (;;)
     {
@@ -141,6 +143,7 @@ void edf_6_run(void)
 {
     stdio_init_all();
     vTraceTaskPinsInit();
+    xEdf6SharedAnchorTick = xTaskGetTickCount();
 
     TaskHandle_t xB1 = NULL;
     TaskHandle_t xB2 = NULL;

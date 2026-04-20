@@ -36,13 +36,15 @@
 #define T3_WCET_MS        1000u
 #define T3_DEADLINE_MS    8000u
 
+static TickType_t xEdf4SharedAnchorTick = 0u;
+
 static void Task1(void *pvParameters)
 {
     TickType_t xLastWakeTime;
     BaseType_t xDelayResult;
 
     (void) pvParameters;
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xEdf4SharedAnchorTick;
 
     for (;;)
     {
@@ -63,7 +65,7 @@ static void Task2(void *pvParameters)
     BaseType_t xDelayResult;
 
     (void) pvParameters;
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xEdf4SharedAnchorTick;
 
     for (;;)
     {
@@ -84,7 +86,7 @@ static void Task3(void *pvParameters)
     BaseType_t xDelayResult;
 
     (void) pvParameters;
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xEdf4SharedAnchorTick;
 
     for (;;)
     {
@@ -103,6 +105,7 @@ void edf_4_run(void)
 {
     stdio_init_all();
     vTraceTaskPinsInit();
+    xEdf4SharedAnchorTick = xTaskGetTickCount();
 
     TaskHandle_t xT1 = NULL;
     TaskHandle_t xT2 = NULL;
