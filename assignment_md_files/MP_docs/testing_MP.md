@@ -60,6 +60,10 @@ Expected observation:
 
 ## Admission control
 
+Timing note:
+- In admission tests that use a separate controller task to create tasks at runtime, observed creation timing is not always exactly as predicted.
+- If the controller task has a large deadline, it can be delayed while other runnable tasks execute.
+
 Use case:
 - verify acceptance and rejection behavior without overloading the GPIO trace with non-scheduling metadata
 
