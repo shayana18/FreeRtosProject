@@ -11,7 +11,9 @@
     #if ( ( configUSE_UP == 1 ) && ( configUSE_MP == 0 ) )
         #if ( configUSE_CBS == 1 )
             #include "cbs_tests/test_2.h"
-        #elif ( configUSE_SRP == 0 )
+            #include "cbs_tests/test_3.h"
+        #include "cbs_tests/test_4.h"
+    #elif ( configUSE_SRP == 0 )
             #include "edf_tests/test_1.h"
             #include "edf_tests/test_2.h"
             #include "edf_tests/test_3.h"
@@ -75,7 +77,11 @@ static void vApplicationFirstDeadlineMissCaptured( void ) __attribute__( ( noinl
 
 int main( void )
 {
-    stdio_init_all();
+    uint32_t ulHeartbeat;
+
+    vTraceUsbSerialInit( 1500u );
+    vTraceUsbPrint( "UART serial ready\r\n" );
+
     
     #if ( configUSE_EDF == 1 )
         #if ( ( configUSE_UP == 1 ) && ( configUSE_MP == 0 ) )
@@ -83,8 +89,15 @@ int main( void )
             // Simple cbs test with one periodic EDF task and one CBS-managed aperiodic task.
             // cbs_1_run();
             // Multiple CBS server test with two periodic tasks plus two CBS-managed aperiodic tasks.
-            cbs_2_run();
-            #elif ( configUSE_SRP == 1 )
+            // cbs_2_run();
+            // Single-server CBS deadline-transition test:
+        // sparse arrival forces deadline = arrival + T (non-multiple), then frequent jobs drain
+        // budget and force deadline = current_deadline + T on exhaustion.
+        // cbs_3_run();
+        // One CBS server with four aperiodic job-source tasks; asserts CBS wins
+        // tie-break against periodic task on equal deadlines.
+        // cbs_4_run();
+        #elif ( configUSE_SRP == 1 )
             // srp_1_run();
             // srp_2_run();
             // srp_3_run();
@@ -165,14 +178,10 @@ void vApplicationStackOverflowHook( TaskHandle_t xTask,
     }
 }
 
-void vApplicationIdleHook( void )
-{
-    /* Must not block; keep empty unless adding non-blocking diagnostics. */
-}
-
-void vApplicationDeadlineMissHook( void )
+void vApplicationDeadlineMissHook( uint32_t ulTaskId )
 {
     xDeadlineMissDebugContext.ulMissCount++;
+    vTraceUsbPrint( "Deadline miss: task id=%lu\r\n", ( unsigned long ) ulTaskId );
 
     if( xDeadlineMissDebugContext.ulFirstCaptured == 0u )
     {

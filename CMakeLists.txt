@@ -82,5 +82,5 @@ pico_set_program_version(FreeRtosProject "0.1")
 pico_add_extra_outputs(${PROJECT_NAME})
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(FreeRtosProject 0)
+pico_enable_stdio_uart(FreeRtosProject 1)
 pico_enable_stdio_usb(FreeRtosProject 0)
