@@ -6,7 +6,11 @@
 #include <stdint.h>
 
 #include "hardware/gpio.h"
+#include "hardware/exception.h"
 #include "pico/stdlib.h"
+#if defined( LIB_PICO_STDIO_USB ) && ( LIB_PICO_STDIO_USB == 1 )
+    #include "pico/stdio_usb.h"
+#endif
 
 #define TRACE_DEADLINE_MISS_HOLD_TICKS    ( ( configTICK_RATE_HZ > 0u ) ? configTICK_RATE_HZ : 1u )
 
@@ -25,13 +29,29 @@ void vTraceUsbSerialInit( uint32_t ulWaitForHostMs )
 void vTraceUsbPrint( const char * pcFormat,
                      ... )
 {
+    if( pcFormat == NULL )
+    {
+        return;
+    }
+
+    /* USB stdio paths are not ISR-safe and can deadlock/assert if called from an ISR. */
+    if( __get_current_exception() != 0u )
+    {
+        return;
+    }
+
+#if defined( LIB_PICO_STDIO_USB ) && ( LIB_PICO_STDIO_USB == 1 )
+    if( stdio_usb_connected() == false )
+    {
+        return;
+    }
+#endif
+
     va_list xArgs;
 
     va_start( xArgs, pcFormat );
     ( void ) vprintf( pcFormat, xArgs );
     va_end( xArgs );
-
-    ( void ) fflush( stdout );
 }
 
 void vTraceTaskPinsInit( void )

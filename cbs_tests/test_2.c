@@ -47,13 +47,15 @@ static TaskHandle_t xP2TaskHandle;
 static TaskHandle_t xA1ArrivalTaskHandle;
 static TaskHandle_t xA2ArrivalTaskHandle;
 
+static TickType_t xCbs2SharedAnchorTick = 0u;
+
 static void vPeriodicTask1( void * pvParameters )
 {
     TickType_t xLastWake;
     BaseType_t xDelayResult;
 
     ( void ) pvParameters;
-    xLastWake = xTaskGetTickCount();
+    xLastWake = xCbs2SharedAnchorTick;
 
     for( ;; )
     {
@@ -74,7 +76,7 @@ static void vPeriodicTask2( void * pvParameters )
     BaseType_t xDelayResult;
 
     ( void ) pvParameters;
-    xLastWake = xTaskGetTickCount();
+    xLastWake = xCbs2SharedAnchorTick;
 
     for( ;; )
     {
@@ -124,7 +126,7 @@ static void vA1ArrivalTask( void * pvParameters )
     TickType_t xLastWake;
 
     ( void ) pvParameters;
-    xLastWake = xTaskGetTickCount();
+    xLastWake = xCbs2SharedAnchorTick;
 
     if( ( pxA1ServerRef != NULL ) && ( xA1WorkerHandle != NULL ) )
     {
@@ -153,7 +155,7 @@ static void vA2ArrivalTask( void * pvParameters )
     TickType_t xLastWake;
 
     ( void ) pvParameters;
-    xLastWake = xTaskGetTickCount();
+    xLastWake = xCbs2SharedAnchorTick;
 
     if( ( pxA2ServerRef != NULL ) && ( xA2WorkerHandle != NULL ) )
     {
@@ -192,6 +194,8 @@ void cbs_2_run( void )
 
     stdio_init_all();
     vTraceTaskPinsInit();
+
+    xCbs2SharedAnchorTick = xTaskGetTickCount();
 
     pxA1ServerRef = xCBSServerCreate( pdMS_TO_TICKS( A1_SERVER_BUDGET_MS ),
                                       pdMS_TO_TICKS( A1_SERVER_PERIOD_MS ),

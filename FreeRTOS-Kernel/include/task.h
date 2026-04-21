@@ -236,6 +236,17 @@ typedef enum
      * puxPerTaskBytes receives the bytes that per-task allocation would use. */
     void vTaskGetSRPSharedStackUsage( size_t * puxSharedBytes,
                                       size_t * puxPerTaskBytes );
+
+    /* Reports SRP stack usage stats in bytes.
+     * current_* are live observed usage estimates,
+     * max_* are max observed values since boot,
+     * theoretical_* are static limits derived from configured task/region depths. */
+    void vTaskGetSRPStackUsageRuntimeStats( size_t * puxCurrentSharedBytes,
+                                            size_t * puxCurrentNonSharedBytes,
+                                            size_t * puxMaxSharedBytes,
+                                            size_t * puxMaxNonSharedBytes,
+                                            size_t * puxTheoreticalSharedBytes,
+                                            size_t * puxTheoreticalNonSharedBytes );
 #endif
 
 /**

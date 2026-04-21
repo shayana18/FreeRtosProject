@@ -27,12 +27,14 @@ static volatile uint32_t ulAperiodicSubmitFailures;
 static TaskHandle_t xAperiodicWorkerHandle;
 static CBS_Server_t * pxAperiodicServer;
 
+static TickType_t xCbs1SharedAnchorTick = 0u;
+
 static void vPeriodicTask( void * pvParameters )
 {
     TickType_t xLastWake;
 
     ( void ) pvParameters;
-    xLastWake = xTaskGetTickCount();
+    xLastWake = xCbs1SharedAnchorTick;
 
     for( ; ; )
     {
@@ -62,7 +64,7 @@ static void vAperiodicArrivalTask( void * pvParameters )
     TickType_t xLastWake;
 
     ( void ) pvParameters;
-    xLastWake = xTaskGetTickCount();
+    xLastWake = xCbs1SharedAnchorTick;
 
     for( ; ; )
     {
@@ -87,6 +89,8 @@ void cbs_1_run( void )
 
     stdio_init_all();
     vTraceTaskPinsInit();
+
+    xCbs1SharedAnchorTick = xTaskGetTickCount();
 
     pxServer = xCBSServerCreate( pdMS_TO_TICKS( CBS_SERVER_BUDGET_MS ),
                                  pdMS_TO_TICKS( CBS_SERVER_PERIOD_MS ),

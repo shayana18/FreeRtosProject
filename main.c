@@ -22,8 +22,10 @@
             #include "edf_tests/test_6.h"
             #include "edf_tests/test_7.h"
             #include "edf_tests/test_8.h"
+            #include "edf_tests/test_9.h"
         #elif ( configUSE_SRP == 1 )
             #include "srp_tests/test_1.h"
+            #include "srp_tests/test_2.h"
         #endif
     #elif ( ( configUSE_MP == 1 ) && ( configUSE_UP == 0 ) )
         #include "mp_tests/test_1.h"
@@ -92,7 +94,7 @@ int main( void )
             // Simple cbs test with one periodic EDF task and one CBS-managed aperiodic task.
             // cbs_1_run();
             // Multiple CBS server test with two periodic tasks plus two CBS-managed aperiodic tasks.
-            // cbs_2_run();
+            cbs_2_run();
             // Single-server CBS deadline-transition test:
         // sparse arrival forces deadline = arrival + T (non-multiple), then frequent jobs drain
         // budget and force deadline = current_deadline + T on exhaustion.
@@ -101,7 +103,7 @@ int main( void )
         // tie-break against periodic task on equal deadlines.
         // cbs_4_run();
         #elif ( configUSE_SRP == 1 )
-            srp_1_run();
+            // srp_1_run();
             // srp_2_run();
             // srp_3_run();
             // srp_4_run();
@@ -109,7 +111,7 @@ int main( void )
             // srp_6_run();
             #elif ( configUSE_SRP == 0 && configUSE_CBS == 0  && GLOBAL_EDF_ENABLE == 0U && PARTITIONED_EDF_ENABLE == 0U )
             // Simple edf implicit deadlinetest case with 3 tasks added at startup with a fairly low utilization.
-            edf_1_run();
+            // edf_1_run();
 
             // Higher utilization (but still < 1.0) edf implicit deadline test with 4 tasks added at startup.
             // edf_2_run();
@@ -131,6 +133,9 @@ int main( void )
 
             // Seven tasks with binary-encoded trace IDs and two intentional single deadline-miss events.
             // edf_8_run();
+
+            // Stress test with 100 tasks to see if edf is able to perform to spec.
+            // edf_9_run();
             #endif
         #elif ( ( configUSE_MP == 1 ) && ( configUSE_UP == 0 ) )
             #if ( GLOBAL_EDF_ENABLE == 1U )

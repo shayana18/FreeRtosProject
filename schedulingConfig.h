@@ -5,8 +5,8 @@
 // EDF selection (if not use stock FP implementation for UP and MP)
 #define configUSE_EDF 1U
 // Uniprocessor scheduling config
-#define configUSE_SRP 1
-#define configUSE_CBS 0
+#define configUSE_SRP 0
+#define configUSE_CBS 1
 // MP scheduling config
 #define GLOBAL_EDF_ENABLE 0U
 #define PARTITIONED_EDF_ENABLE 0U
@@ -107,4 +107,10 @@
 
 #if ( configUSE_SRP_SHARED_STACKS != 0 ) && ( configUSE_SRP_SHARED_STACKS != 1U )
 	#error "configUSE_SRP_SHARED_STACKS must be either 0 or 1U"
+#endif
+
+/* Enables periodic SRP shared-stack usage reporting from test_utils.
+ * Set to 0U to compile out all SRP stack-report print calls in test code. */
+#ifndef configENABLE_TEST_SRP_STACK_REPORT
+	#define configENABLE_TEST_SRP_STACK_REPORT 1U
 #endif

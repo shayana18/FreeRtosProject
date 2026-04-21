@@ -3211,6 +3211,15 @@ typedef struct xSTATIC_TCB
                 TickType_t xSRPResourceMaxCriticalSectionTicks[ configSRP_RESOURCE_TYPE_COUNT ];
                 UBaseType_t uxSRPResourceHeldCount[ configSRP_RESOURCE_TYPE_COUNT ];
             #endif
+            #if ( configUSE_SRP_SHARED_STACKS == 1 )
+                StackType_t * pxSRPSavedContextBuffer;
+                configSTACK_DEPTH_TYPE uxSRPSavedContextCapacityWords;
+                configSTACK_DEPTH_TYPE uxSRPSavedContextWords;
+                configSTACK_DEPTH_TYPE uxSRPSavedImageBaseOffsetWords;
+                configSTACK_DEPTH_TYPE uxSRPSavedTopOffsetWords;
+                BaseType_t xSRPSharedStackResident;
+                BaseType_t xSRPUsesSharedStack;
+            #endif
         #endif
         #if ( ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
             void * pxCBSServer;                  /**< Mirrors TCB_t::pxCBSServer for static allocation size compatibility. */
