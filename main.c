@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdio.h>
 
 #include "schedulingConfig.h"
 #include "FreeRTOS.h"
@@ -6,22 +7,39 @@
 #include "task_trace.h"
 #include "pico/stdlib.h"
 
-#if ( configUSE_EDF == 1)
-    #if(configUSE_CBS == 1)
-        #include "cbs_tests/test_2.h"
-        #include "cbs_tests/test_3.h"
+#if ( configUSE_EDF == 1 )
+    #if ( ( configUSE_UP == 1 ) && ( configUSE_MP == 0 ) )
+        #if ( configUSE_CBS == 1 )
+            #include "cbs_tests/test_2.h"
+            #include "cbs_tests/test_3.h"
         #include "cbs_tests/test_4.h"
-    #elif(configUSE_SRP == 0)
-        #include "edf_tests/test_1.h"
-        #include "edf_tests/test_2.h"
-        #include "edf_tests/test_3.h"
-        #include "edf_tests/test_4.h"
-        #include "edf_tests/test_5.h"
-        #include "edf_tests/test_6.h"
-        #include "edf_tests/test_7.h"
-        #include "edf_tests/test_8.h"
-    #elif (configUSE_SRP == 1 )
-        #include "srp_tests/test_1.h"
+    #elif ( configUSE_SRP == 0 )
+            #include "edf_tests/test_1.h"
+            #include "edf_tests/test_2.h"
+            #include "edf_tests/test_3.h"
+            #include "edf_tests/test_4.h"
+            #include "edf_tests/test_5.h"
+            #include "edf_tests/test_6.h"
+            #include "edf_tests/test_7.h"
+            #include "edf_tests/test_8.h"
+        #elif ( configUSE_SRP == 1 )
+            #include "srp_tests/test_1.h"
+        #endif
+    #elif ( ( configUSE_MP == 1 ) && ( configUSE_UP == 0 ) )
+        #include "mp_tests/test_1.h"
+        #include "mp_tests/test_2.h"
+        #include "mp_tests/demo_tests/test_1_glob.h"
+        #include "mp_tests/demo_tests/test_1_part.h"
+        #include "mp_tests/demo_tests/test_2_dhall.h"
+
+        #if ( PARTITIONED_EDF_ENABLE == 0U )
+            #include "mp_tests/global_edf_tests/test_1.h"
+            #include "mp_tests/global_edf_tests/test_2.h"
+            #include "mp_tests/global_edf_tests/test_3.h"
+        #else
+            #include "mp_tests/partitioned_edf_tests/test_1.h"
+            #include "mp_tests/partitioned_edf_tests/test_2.h"
+        #endif
     #endif
 #endif
 
@@ -67,57 +85,94 @@ int main( void )
     vTraceUsbSerialInit( 1500u );
     vTraceUsbPrint( "UART serial ready\r\n" );
 
-    
-    #if ( configUSE_EDF == 1)
-        #if ( configUSE_CBS == 1 )
-        // Simple cbs test with one periodic EDF task and one CBS-managed aperiodic task.
-        // cbs_1_run();
-        // Multiple CBS server test with two periodic tasks plus two CBS-managed aperiodic tasks.
-        // cbs_2_run();
-        // Single-server CBS deadline-transition test:
+
+    #if ( configUSE_EDF == 1 )
+        #if ( ( configUSE_UP == 1 ) && ( configUSE_MP == 0 ) )
+            #if ( configUSE_CBS == 1 )
+            // Simple cbs test with one periodic EDF task and one CBS-managed aperiodic task.
+            // cbs_1_run();
+            // Multiple CBS server test with two periodic tasks plus two CBS-managed aperiodic tasks.
+            // cbs_2_run();
+            // Single-server CBS deadline-transition test:
         // sparse arrival forces deadline = arrival + T (non-multiple), then frequent jobs drain
         // budget and force deadline = current_deadline + T on exhaustion.
         // cbs_3_run();
         // One CBS server with four aperiodic job-source tasks; asserts CBS wins
         // tie-break against periodic task on equal deadlines.
         // cbs_4_run();
-        #elif (configUSE_SRP == 1 )
-        // srp_1_run();
-        // srp_2_run();
-        // srp_3_run();
-        // srp_4_run();
-        // srp_5_run();
-        // srp_6_run();
-        #elif (configUSE_SRP == 0 && configUSE_CBS == 0 )
-        // Simple edf implicit deadlinetest case with 3 tasks added at startup with a fairly low utilization.
-        // edf_1_run(); 
+        #elif ( configUSE_SRP == 1 )
+            srp_1_run();
+            // srp_2_run();
+            // srp_3_run();
+            // srp_4_run();
+            // srp_5_run();
+            // srp_6_run();
+            #elif ( configUSE_SRP == 0 && configUSE_CBS == 0  && GLOBAL_EDF_ENABLE == 0U && PARTITIONED_EDF_ENABLE == 0U )
+            // Simple edf implicit deadlinetest case with 3 tasks added at startup with a fairly low utilization.
+            edf_1_run();
 
-        // Higher utilization (but still < 1.0) edf implicit deadline test with 4 tasks added at startup.
-        // edf_2_run(); 
+            // Higher utilization (but still < 1.0) edf implicit deadline test with 4 tasks added at startup.
+            // edf_2_run();
 
-        // EDF admission control test, attempts to add unschedulable task at startup and after 10s, then adds a schedulable task.
-        // edf_3_run(); 
+            // EDF admission control test, attempts to add unschedulable task at startup and after 10s, then adds a schedulable task.
+            // edf_3_run();
 
-        // Constrained deadline EDF test with 3 tasks (D != T).
-        // edf_4_run();
+            // Constrained deadline EDF test with 3 tasks (D != T).
+            // edf_4_run();
 
-        // Higher utilization Constrained deadline EDF test with 4 tasks (D < T).
-        //  edf_5_run(); 
+            // Higher utilization Constrained deadline EDF test with 4 tasks (D < T).
+            // edf_5_run();
 
-        // Constrained deadline admission control test (expected reject then accept).
-        // edf_6_run();
+            // Constrained deadline admission control test (expected reject then accept).
+            // edf_6_run();
 
-        // Implicit deadline admission control test (utilization path: expected reject then accept).
-        // edf_7_run();
+            // Implicit deadline admission control test (utilization path: expected reject then accept).
+            // edf_7_run();
 
-        // Seven tasks with binary-encoded trace IDs and two intentional single deadline-miss events.
-        // edf_8_run();
-        #endif 
+            // Seven tasks with binary-encoded trace IDs and two intentional single deadline-miss events.
+            // edf_8_run();
+            #endif
+        #elif ( ( configUSE_MP == 1 ) && ( configUSE_UP == 0 ) )
+            #if ( GLOBAL_EDF_ENABLE == 1U )
+            // Global EDF basic dispatch: two earliest-deadline jobs should occupy the two cores.
+            // mp_global_edf_1_run();
+
+            // Global EDF preemption: a later earlier-deadline release should replace a worse running job.
+            // mp_global_edf_2_run();
+
+            // Global EDF migration: one unrestricted task should appear on both cores across different jobs.
+            // mp_global_edf_3_run();
+
+            // DEMO TESTING
+            // mp_demo_test_1_glob_run();
+            // mp_demo_test_2_dhall_run();
+
+            #else
+            // Partitioned EDF basic: tasks should only appear on their assigned core bank.
+            // mp_partitioned_edf_1_run();
+
+            // Partitioned EDF explicit migration: a task should move to the new core after affinity change.
+            // mp_partitioned_edf_2_run();
+
+            // DEMO TEST
+            // mp_demo_test_1_part_run();
+            #endif
+
+            // MP EDF admission control using volatile pass/fail result flags.
+            // mp_edf_admission_1_run();
+
+            // MP EDF run-time task creation for the active MP scheduling mode.
+            // mp_edf_runtime_create_1_run();
+        #endif
     #endif
 
     for( ;; )
     {
     }
+}
+
+void vApplicationIdleHook( void )
+{
 }
 
 void vApplicationStackOverflowHook( TaskHandle_t xTask,

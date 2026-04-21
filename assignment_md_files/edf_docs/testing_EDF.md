@@ -12,6 +12,7 @@
 - EDF tests (and all future tests) uses macros and hooks found in the `test_utils.c/h` and `task_trace.c/h` files in the root directory.
 
 # EDF Test Methods
+- Admission-test timing note: for admission tests that use a separate controller task to create tasks at runtime, observed creation timing is not always exactly as predicted. When the controller has a large deadline, it may be delayed while other runnable tasks execute.
 - For task sets that have fewer tasks (reasonably we can say < 10), we will perform an analysis on what we expect the schedule to look like from the beginning till roughly 30s which for most task sets allows us to find examples of the scheduler responding in correct ways to specific scenarios such as preempting a running task, maintaining the current task despite a task arrival, etc.
 - We then run the test on hardware and monitor the output waveform and ensure the behaviour matches what manual scheduling analysis gave.
 - For larger task sets to see verify the system is able to handle up to 100 tasks as the assignment states, we can instead choose to do a utilization analysis to ensure that the task set can run, then monitor the test when running on hardware to verify that there are no deadline misses and we can examine snapshots of the tasks running to verify scheduling is working as intended rather than painstakingly creating an expected schedule for all 100 tasks.

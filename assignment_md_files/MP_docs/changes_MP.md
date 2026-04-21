@@ -1,0 +1,34 @@
+# MP EDF kernel changes
+
+- Added MP scheduling configuration validation in `schedulingConfig.h` so `configUSE_UP` and `configUSE_MP` cannot both be enabled, and so `GLOBAL_EDF_ENABLE` / `PARTITIONED_EDF_ENABLE` are only valid when `configUSE_MP == 1` and `configUSE_EDF == 1`.
+- Kept the kernel mode split explicit throughout the code base: UP EDF, MP EDF, and stock scheduling each remain behind direct config guards instead of derived internal mode macros.
+- Added separate MP EDF ready and registry state in `tasks.c`:
+  - `xReadyEDFTasksList_Glob_MP`
+  - `xEDFTaskRegistryList_Glob_MP`
+  - `xReadyEDFTasksLists_Part_MP[ configNUMBER_OF_CORES ]`
+  - `xEDFTaskRegistryLists_Part_MP[ configNUMBER_OF_CORES ]`
+- Extended the EDF `xTaskCreate()` MP overload so task creation accepts an affinity mask, validates the periodic task model, runs MP admission control, initializes EDF metadata, and inserts the task into the correct MP EDF data structures.
+- Made global EDF the default MP EDF mode when `PARTITIONED_EDF_ENABLE == 0`, even if `GLOBAL_EDF_ENABLE` is left at `0`, to match the assignment requirement that global EDF is the default multicore scheduler.
+- Added MP EDF admission helpers:
+  - `prvTestEDFUtilPerCoreWithNewQ32()` for fixed-point per-list utilization checks
+  - `prvGlobEDFUtilTestWithNew()` for the global EDF sufficient test
+  - `prvPartEDFUtilTestWithNew()` for partitioned EDF admission plus placement
+- Used a sufficient global EDF admission test of the form `U_total <= m - ( m - 1 ) U_max` because no necessary-and-sufficient global EDF test was covered in class.
+- Used a conservative partitioned EDF screen plus per-core fit check so tasks are only accepted when at least one partition can absorb them.
+- Added `prvPartEDFCoreFromAffinityMask()` so partitioned EDF can decode and validate one-hot core assignments from affinity masks.
+- Updated the EDF ready-list insertion path so:
+  - UP EDF inserts into `xReadyEDFTasksList_UP`
+  - global EDF inserts into `xReadyEDFTasksList_Glob_MP`
+  - partitioned EDF inserts into the correct `xReadyEDFTasksLists_Part_MP[ core ]`
+- Updated EDF task registration so periodic MP EDF tasks are inserted into the correct global or partitioned registry list at task creation time.
+- Added MP EDF task-selection support in SMP `vTaskSwitchContext()`:
+  - `prvSelectGlobEDFTaskForCore()` chooses the earliest eligible non-running task from the global EDF ready list
+  - `prvSelectPartEDFTaskForCore()` chooses from the per-core partition ready list
+- Updated `prvYieldForTask()` so SMP preemption targeting is EDF-aware:
+  - partitioned EDF compares only against the running task on the assigned core
+  - global EDF compares against all eligible running cores and yields the core running the worst current EDF job
+- Extended `xTaskIncrementTick()` so MP EDF runtime accounting is performed per running core rather than only for a single current task.
+- Added `prvAddTaskToDelayedListForTask()` so MP EDF tick-time job completion and deadline-miss handling can delay an explicit running task rather than relying on the UP-only implicit current-task helper.
+- Updated periodic EDF reinsertion paths such as `xTaskDelayUntil()` so the correct UP/global/partitioned EDF registry list is chosen before re-registering the next job.
+- Added explicit partition migration support in `vTaskCoreAffinitySet()` through `prvPartEDFMoveTaskToAssignedCore()`, which moves a task between partition ready and registry lists when its assigned core changes.
+- Kept the stock SMP fixed-priority scheduler available as the fallback path whenever EDF is disabled in MP mode.

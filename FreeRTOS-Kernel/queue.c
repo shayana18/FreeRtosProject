@@ -1874,7 +1874,7 @@ BaseType_t xQueueSemaphoreTake( QueueHandle_t xQueue,
 }
 /*-----------------------------------------------------------*/
 
-#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
 
 BaseType_t xQueueSemaphoreTakeSRP( QueueHandle_t xQueue,
                                    TickType_t xTicksToWait,
@@ -1954,7 +1954,7 @@ BaseType_t xQueueSemaphoreGiveSRP( QueueHandle_t xQueue,
     return xReturn;
 }
 
-#endif /* ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) */
+#endif /* ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) ) */
 /*-----------------------------------------------------------*/
 
 BaseType_t xQueuePeek( QueueHandle_t xQueue,
