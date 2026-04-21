@@ -44,12 +44,13 @@
 #define T6_DEADLINE_MS         4000u
 #define T6_R1_CS_MS             200u
 #define T6_NON_CRIT_MS          900u
+#define T6_JITTER_COMPENSATION_MS 50u
 #define T6_WCET_MS             ( T6_R1_CS_MS + T6_NON_CRIT_MS + WCET_SLACK )
 #define T6_RELEASE_OFFSET_MS   ( T1_NON_CRIT_MS + T1_R1_CS_MS + \
                                  T2_NON_CRIT_MS + T2_R2_CS_MS + \
                                  T3_NON_CRIT_MS + T3_R1_CS_MS + \
                                  T4_NON_CRIT_MS + T4_R2_CS_MS + \
-                                 T5_NON_CRIT_MS )
+                                 T5_NON_CRIT_MS + T6_JITTER_COMPENSATION_MS )
 
 #define SRP_RESOURCE_R1           0u
 #define SRP_RESOURCE_R2           1u

@@ -3959,6 +3959,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
         {
             BaseType_t xReturn = pdFAIL;
             TCB_t * pxReleasedFromTCB = NULL;
+            BaseType_t xShouldPendYield = pdFALSE;
 
             if( uxResourceType >= ( UBaseType_t ) configSRP_RESOURCE_TYPE_COUNT )
             {
@@ -3981,12 +3982,32 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                             pxCurrentTCB->uxSRPResourceHeldCount[ uxResourceType ] = 0U;
                             pxReleasedFromTCB = pxCurrentTCB;
                             prvSRPRecomputeSystemCeiling();
+
+                            #if ( configUSE_PREEMPTION == 1 )
+                            {
+                                TCB_t * pxNextTCB = prvSRPSelectReadyTask();
+
+                                if( ( pxNextTCB != NULL ) &&
+                                    ( pxNextTCB != pxCurrentTCB ) )
+                                {
+                                    xShouldPendYield = pdTRUE;
+                                }
+                            }
+                            #endif
+
                             xReturn = pdPASS;
                         }
                     }
                 #endif
             }
             taskEXIT_CRITICAL();
+
+            #if ( configUSE_PREEMPTION == 1 )
+                if( xShouldPendYield != pdFALSE )
+                {
+                    xYieldPendings[ portGET_CORE_ID() ] = pdTRUE;
+                }
+            #endif
 
             #if ( configUSE_SRP_RESOURCE_RELEASE_HOOK == 1 )
                 if( ( xReturn == pdPASS ) &&
@@ -4053,6 +4074,8 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
             }
         }
 
+        #if( configUSE_SRP_SHARED_STACKS == 1 )
+
         void vTaskGetSRPStackUsageRuntimeStats( size_t * puxCurrentSharedBytes,
                                                 size_t * puxCurrentNonSharedBytes,
                                                 size_t * puxMaxSharedBytes,
@@ -4110,6 +4133,8 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                 *puxTheoreticalNonSharedBytes = uxTheoreticalNonSharedBytes;
             }
         }
+
+        #endif /* configUSE_SRP_SHARED_STACKS == 1 */
 
     #endif /* ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) */
 

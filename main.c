@@ -104,11 +104,7 @@ int main( void )
         // cbs_4_run();
         #elif ( configUSE_SRP == 1 )
             // srp_1_run();
-            // srp_2_run();
-            // srp_3_run();
-            // srp_4_run();
-            // srp_5_run();
-            // srp_6_run();
+            srp_2_run();
             #elif ( configUSE_SRP == 0 && configUSE_CBS == 0  && GLOBAL_EDF_ENABLE == 0U && PARTITIONED_EDF_ENABLE == 0U )
             // Simple edf implicit deadlinetest case with 3 tasks added at startup with a fairly low utilization.
             // edf_1_run();
@@ -135,7 +131,7 @@ int main( void )
             // edf_8_run();
 
             // Stress test with 100 tasks to see if edf is able to perform to spec.
-            // edf_9_run();
+            edf_9_run();
             #endif
         #elif ( ( configUSE_MP == 1 ) && ( configUSE_UP == 0 ) )
             #if ( GLOBAL_EDF_ENABLE == 1U )
@@ -149,7 +145,7 @@ int main( void )
             // mp_global_edf_3_run();
 
             // DEMO TESTING
-            // mp_demo_test_1_glob_run();
+            mp_demo_test_1_glob_run();
             // mp_demo_test_2_dhall_run();
 
             #else

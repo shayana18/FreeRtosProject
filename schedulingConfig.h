@@ -5,13 +5,13 @@
 // EDF selection (if not use stock FP implementation for UP and MP)
 #define configUSE_EDF 1U
 // Uniprocessor scheduling config
-#define configUSE_SRP 0
-#define configUSE_CBS 1
+#define configUSE_SRP 1
+#define configUSE_CBS 0
 // MP scheduling config
 #define GLOBAL_EDF_ENABLE 0U
 #define PARTITIONED_EDF_ENABLE 0U
 // SRP stack sharing
-#define configUSE_SRP_SHARED_STACKS 0u
+#define configUSE_SRP_SHARED_STACKS 1u
 
 #if ( configUSE_UP == 1U ) && ( configUSE_MP == 1U )
     #error "configUSE_UP and configUSE_MP cannot both be enabled"
