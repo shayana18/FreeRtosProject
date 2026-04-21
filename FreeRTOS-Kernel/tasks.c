@@ -700,11 +700,13 @@ PRIVILEGED_DATA static volatile configRUN_TIME_COUNTER_TYPE ulTotalRunTime[ conf
         static BaseType_t prvEDFValidateParams( TickType_t xT,
                                                 TickType_t xWCET,
                                                 TickType_t xRelD ) PRIVILEGED_FUNCTION;
-        static setDeadlineType prvEDFTaskSetDeadlineType( TickType_t xNewT,
-                                                          TickType_t xNewD ) PRIVILEGED_FUNCTION;
-        static BaseType_t prvEDFDemandTestWithNew( TickType_t xNewC,
-                                                   TickType_t xNewT,
-                                                   TickType_t xNewD ) PRIVILEGED_FUNCTION;
+        #if ( configUSE_SRP == 0U )
+            static setDeadlineType prvEDFTaskSetDeadlineType( TickType_t xNewT,
+                                                              TickType_t xNewD ) PRIVILEGED_FUNCTION;
+            static BaseType_t prvEDFDemandTestWithNew( TickType_t xNewC,
+                                                       TickType_t xNewT,
+                                                       TickType_t xNewD ) PRIVILEGED_FUNCTION;
+        #endif
     #endif
     #if ( ( configUSE_MP == 1U ) && ( configUSE_UP == 0U ) && ( PARTITIONED_EDF_ENABLE == 1U ) )
         static BaseType_t prvPartEDFCoreFromAffinityMask( UBaseType_t uxCoreAffinityMask ) PRIVILEGED_FUNCTION;
@@ -2005,9 +2007,9 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
         return pdFALSE;
     }
 /*-----------------------------------------------------------*/
-    #if (configUSE_UP == 1 && configUSE_MP == 0U)
+    #if ( ( configUSE_UP == 1U ) && ( configUSE_MP == 0U ) && ( configUSE_SRP == 0U ) )
         static setDeadlineType prvEDFTaskSetDeadlineType( TickType_t xNewT,
-                                                        TickType_t xNewD )
+                                                          TickType_t xNewD )
         {
             ListItem_t * pxItem;
 
@@ -4543,36 +4545,36 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
 
             #if ( configUSE_EDF == 1 )
             {
-                /* Insert periodic EDF tasks into the EDF registry list only after
-                 * the list structures have been initialised by prvInitialiseTaskLists().
-                 * (If inserted earlier, prvInitialiseTaskLists() would reset the list and
-                 * the task would be missing from admission tests.) */
-                if( pxNewTCB->xPeriodTicks != ( TickType_t ) 0U )
-                {
-                    listSET_LIST_ITEM_VALUE( &( pxNewTCB->xEDFTaskListItem ),
-                                             pxNewTCB->xAbsJobReleaseTime );
-                    vListInsert( &xEDFTaskRegistryList_UP,
-                                 &( pxNewTCB->xEDFTaskListItem ) );
-                }
+                #if(configUSE_UP == 1U && configUSE_MP == 0)
+                    #if (configUSE_SRP == 1)
+                        /* Mirror EDF registry behaviour: only periodic SRP tasks take
+                        * part in periodic run-time accounting. Internal zero-period
+                        * tasks, including the idle task, must stay out of this list. */
+                        if( pxNewTCB->xPeriodTicks != ( TickType_t ) 0U )
+                        {
+                            listSET_LIST_ITEM_VALUE( &( pxNewTCB->xSRPTaskListItem ),
+                                                    pxNewTCB->xAbsJobReleaseTime );
+                            vListInsert( &xSRPTaskRegistryList_UP,
+                                        &( pxNewTCB->xSRPTaskListItem ) );
+
+                            prvSRPRecomputeSystemCeiling();
+                        }
+                    #else 
+                        /* Insert periodic EDF tasks into the EDF registry list only after
+                        * the list structures have been initialised by prvInitialiseTaskLists().
+                        * (If inserted earlier, prvInitialiseTaskLists() would reset the list and
+                        * the task would be missing from admission tests.) */
+                        if( pxNewTCB->xPeriodTicks != ( TickType_t ) 0U )
+                        {
+                            listSET_LIST_ITEM_VALUE( &( pxNewTCB->xEDFTaskListItem ),
+                                                    pxNewTCB->xAbsJobReleaseTime );
+                            vListInsert( &xEDFTaskRegistryList_UP,
+                                        &( pxNewTCB->xEDFTaskListItem ) );
+                        }
+                    #endif
+                #endif
             }
             #endif
-            #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
-            {
-                /* Mirror EDF registry behaviour: only periodic SRP tasks take
-                 * part in periodic run-time accounting. Internal zero-period
-                 * tasks, including the idle task, must stay out of this list. */
-                if( pxNewTCB->xPeriodTicks != ( TickType_t ) 0U )
-                {
-                    listSET_LIST_ITEM_VALUE( &( pxNewTCB->xSRPTaskListItem ),
-                                             pxNewTCB->xAbsJobReleaseTime );
-                    vListInsert( &xSRPTaskRegistryList_UP,
-                                 &( pxNewTCB->xSRPTaskListItem ) );
-
-                    prvSRPRecomputeSystemCeiling();
-                }
-            }
-            #endif
-
             portSETUP_TCB( pxNewTCB );
         }
         taskEXIT_CRITICAL();
@@ -6291,13 +6293,28 @@ static BaseType_t prvCreateIdleTasks( void )
                 }
             }
             #endif /* if ( configNUMBER_OF_CORES == 1 ) */
-            xIdleTaskHandles[ xCoreID ] = xTaskCreateStatic( pxIdleTaskFunction,
-                                                             cIdleName,
-                                                             uxIdleTaskStackSize,
-                                                             ( void * ) NULL,
-                                                             portPRIVILEGE_BIT, /* In effect ( tskIDLE_PRIORITY | portPRIVILEGE_BIT ), but tskIDLE_PRIORITY is zero. */
-                                                             pxIdleTaskStackBuffer,
-                                                             pxIdleTaskTCBBuffer );
+            #if ( ( configUSE_EDF == 1 ) && ( configUSE_MP == 1U ) && ( configUSE_UP == 0U ) && ( PARTITIONED_EDF_ENABLE == 1U ) && ( configUSE_CORE_AFFINITY == 1 ) )
+            {
+                xIdleTaskHandles[ xCoreID ] = xTaskCreateStaticAffinitySet( pxIdleTaskFunction,
+                                                                            cIdleName,
+                                                                            uxIdleTaskStackSize,
+                                                                            ( void * ) NULL,
+                                                                            portPRIVILEGE_BIT, /* In effect ( tskIDLE_PRIORITY | portPRIVILEGE_BIT ), but tskIDLE_PRIORITY is zero. */
+                                                                            pxIdleTaskStackBuffer,
+                                                                            pxIdleTaskTCBBuffer,
+                                                                            ( UBaseType_t ) 1U << ( UBaseType_t ) xCoreID );
+            }
+            #else
+            {
+                xIdleTaskHandles[ xCoreID ] = xTaskCreateStatic( pxIdleTaskFunction,
+                                                                 cIdleName,
+                                                                 uxIdleTaskStackSize,
+                                                                 ( void * ) NULL,
+                                                                 portPRIVILEGE_BIT, /* In effect ( tskIDLE_PRIORITY | portPRIVILEGE_BIT ), but tskIDLE_PRIORITY is zero. */
+                                                                 pxIdleTaskStackBuffer,
+                                                                 pxIdleTaskTCBBuffer );
+            }
+            #endif
 
             if( xIdleTaskHandles[ xCoreID ] != NULL )
             {
@@ -6311,12 +6328,26 @@ static BaseType_t prvCreateIdleTasks( void )
         #else /* if ( configSUPPORT_STATIC_ALLOCATION == 1 ) */
         {
             /* The Idle task is being created using dynamically allocated RAM. */
-            xReturn = xTaskCreate( pxIdleTaskFunction,
-                                   cIdleName,
-                                   configMINIMAL_STACK_SIZE,
-                                   ( void * ) NULL,
-                                   portPRIVILEGE_BIT, /* In effect ( tskIDLE_PRIORITY | portPRIVILEGE_BIT ), but tskIDLE_PRIORITY is zero. */
-                                   &xIdleTaskHandles[ xCoreID ] );
+            #if ( ( configUSE_EDF == 1 ) && ( configUSE_MP == 1U ) && ( configUSE_UP == 0U ) && ( PARTITIONED_EDF_ENABLE == 1U ) && ( configUSE_CORE_AFFINITY == 1 ) )
+            {
+                xReturn = xTaskCreateAffinitySet( pxIdleTaskFunction,
+                                                  cIdleName,
+                                                  configMINIMAL_STACK_SIZE,
+                                                  ( void * ) NULL,
+                                                  portPRIVILEGE_BIT, /* In effect ( tskIDLE_PRIORITY | portPRIVILEGE_BIT ), but tskIDLE_PRIORITY is zero. */
+                                                  ( UBaseType_t ) 1U << ( UBaseType_t ) xCoreID,
+                                                  &xIdleTaskHandles[ xCoreID ] );
+            }
+            #else
+            {
+                xReturn = xTaskCreate( pxIdleTaskFunction,
+                                       cIdleName,
+                                       configMINIMAL_STACK_SIZE,
+                                       ( void * ) NULL,
+                                       portPRIVILEGE_BIT, /* In effect ( tskIDLE_PRIORITY | portPRIVILEGE_BIT ), but tskIDLE_PRIORITY is zero. */
+                                       &xIdleTaskHandles[ xCoreID ] );
+            }
+            #endif
         }
         #endif /* configSUPPORT_STATIC_ALLOCATION */
 

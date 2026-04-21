@@ -20,17 +20,16 @@
  * - Migrating task M: initially pinned to core 0, T=4000 ms, C=900 ms,  D=T, tag 1
  * - Core-0 background: pinned to core 0, T=5000 ms, C=1200 ms, D=T, tag 2
  * - Core-1 background: pinned to core 1, T=5000 ms, C=1200 ms, D=T, tag 4
- * - Controller: pinned to core 0, after ~10 s calls `vTaskCoreAffinitySet( M, 1 << 1 )`, tag 7
  *
  * Desired observations:
  * - Before migration, tag 1 should appear only on core 0's bank.
- * - After the controller changes the affinity, later jobs of tag 1 should stop
+ * - After the migrating task completes five jobs, it changes its own affinity
+ *   to core 1.
+ * - After that change, later jobs of tag 1 should stop
  *   appearing on core 0 and should appear only on core 1.
  */
 
 #define PART2_STACK_DEPTH           256u
-#define PART2_CTRL_PERIOD_MS        30000u
-#define PART2_CTRL_WCET_MS          10u
 
 typedef struct MPPartMigrationTaskConfig
 {
@@ -39,6 +38,8 @@ typedef struct MPPartMigrationTaskConfig
     uint32_t ulPeriodMs;
     uint32_t ulWcetMs;
     UBaseType_t uxCoreAffinityMask;
+    uint32_t ulMigrateAfterJobs;
+    UBaseType_t uxMigrationTargetMask;
 } MPPartMigrationTaskConfig_t;
 
 static TaskHandle_t xMigratingTaskHandle = NULL;
@@ -49,6 +50,7 @@ static void vMPPartMigrationTask( void * pvParameters )
     const MPPartMigrationTaskConfig_t * pxCfg = ( const MPPartMigrationTaskConfig_t * ) pvParameters;
     TickType_t xLastWakeTime;
     BaseType_t xDelayResult;
+    uint32_t ulCompletedJobs = 0u;
 
     configASSERT( pxCfg != NULL );
 
@@ -57,6 +59,15 @@ static void vMPPartMigrationTask( void * pvParameters )
     for( ;; )
     {
         spin_ms( pxCfg->ulWcetMs );
+
+        ulCompletedJobs++;
+
+        if( ( pxCfg->ulMigrateAfterJobs != 0u ) &&
+            ( ulCompletedJobs == pxCfg->ulMigrateAfterJobs ) )
+        {
+            vTaskCoreAffinitySet( xTaskGetCurrentTaskHandle(),
+                                  pxCfg->uxMigrationTargetMask );
+        }
 
         xDelayResult = xTaskDelayUntil( &xLastWakeTime,
                                         pdMS_TO_TICKS( pxCfg->ulPeriodMs ) );
@@ -68,23 +79,6 @@ static void vMPPartMigrationTask( void * pvParameters )
     }
 }
 
-static void vMPPartMigrationControllerTask( void * pvParameters )
-{
-    ( void ) pvParameters;
-
-    vTaskDelay( pdMS_TO_TICKS( 10000u ) );
-
-    if( xMigratingTaskHandle != NULL )
-    {
-        vTaskCoreAffinitySet( xMigratingTaskHandle, ( UBaseType_t ) 1u << 1u );
-    }
-
-    for( ;; )
-    {
-        vTaskDelay( pdMS_TO_TICKS( 1000u ) );
-    }
-}
-
 void mp_partitioned_edf_2_run( void )
 {
     static const MPPartMigrationTaskConfig_t xMigratingCfg =
@@ -93,7 +87,9 @@ void mp_partitioned_edf_2_run( void )
         .ulTag = 1u,
         .ulPeriodMs = 4000u,
         .ulWcetMs = 900u,
-        .uxCoreAffinityMask = ( UBaseType_t ) 1u << 0u
+        .uxCoreAffinityMask = ( UBaseType_t ) 1u << 0u,
+        .ulMigrateAfterJobs = 5u,
+        .uxMigrationTargetMask = ( UBaseType_t ) 1u << 1u
     };
     static const MPPartMigrationTaskConfig_t xCore0Cfg =
     {
@@ -101,7 +97,9 @@ void mp_partitioned_edf_2_run( void )
         .ulTag = 2u,
         .ulPeriodMs = 5000u,
         .ulWcetMs = 1200u,
-        .uxCoreAffinityMask = ( UBaseType_t ) 1u << 0u
+        .uxCoreAffinityMask = ( UBaseType_t ) 1u << 0u,
+        .ulMigrateAfterJobs = 0u,
+        .uxMigrationTargetMask = 0u
     };
     static const MPPartMigrationTaskConfig_t xCore1Cfg =
     {
@@ -109,11 +107,12 @@ void mp_partitioned_edf_2_run( void )
         .ulTag = 4u,
         .ulPeriodMs = 5000u,
         .ulWcetMs = 1200u,
-        .uxCoreAffinityMask = ( UBaseType_t ) 1u << 1u
+        .uxCoreAffinityMask = ( UBaseType_t ) 1u << 1u,
+        .ulMigrateAfterJobs = 0u,
+        .uxMigrationTargetMask = 0u
     };
     TaskHandle_t xCore0Handle = NULL;
     TaskHandle_t xCore1Handle = NULL;
-    TaskHandle_t xControllerHandle = NULL;
 
     stdio_init_all();
     vTraceTaskPinsInit();
@@ -149,16 +148,6 @@ void mp_partitioned_edf_2_run( void )
                           xCore1Cfg.ulPeriodMs,
                           xCore1Cfg.uxCoreAffinityMask );
 
-    ( void ) xTaskCreate( vMPPartMigrationControllerTask,
-                          "P Ctrl",
-                          PART2_STACK_DEPTH,
-                          NULL,
-                          &xControllerHandle,
-                          PART2_CTRL_PERIOD_MS,
-                          PART2_CTRL_WCET_MS,
-                          PART2_CTRL_PERIOD_MS,
-                          ( UBaseType_t ) 1u << 0u );
-
     if( xMigratingTaskHandle != NULL )
     {
         vTaskSetApplicationTaskTag( xMigratingTaskHandle,
@@ -175,12 +164,6 @@ void mp_partitioned_edf_2_run( void )
     {
         vTaskSetApplicationTaskTag( xCore1Handle,
                                     ( TaskHookFunction_t ) ( uintptr_t ) xCore1Cfg.ulTag );
-    }
-
-    if( xControllerHandle != NULL )
-    {
-        vTaskSetApplicationTaskTag( xControllerHandle,
-                                    ( TaskHookFunction_t ) ( uintptr_t ) 7u );
     }
 
     vTaskStartScheduler();

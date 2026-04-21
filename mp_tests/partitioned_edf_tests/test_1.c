@@ -13,13 +13,19 @@
 #include "task_trace.h"
 #include "test_utils.h"
 
+#define  TASK1_WORK 900
+#define  TASK2_WORK 800
+#define  TASK3_WORK 800
+
+
+
 /*
  * Partitioned EDF basic dispatch test.
  *
  * Task set:
- * - P0A: pinned to core 0, T=4000 ms, C=1000 ms, D=T, tag 1
- * - P0B: pinned to core 0, T=6000 ms, C=900 ms,  D=T, tag 2
- * - P1A: pinned to core 1, T=5000 ms, C=1000 ms, D=T, tag 4
+ * - P0A: pinned to core 0, T=4000 ms, C=900 ms, D=T, tag 1
+ * - P0B: pinned to core 0, T=6000 ms, C=800 ms,  D=T, tag 2
+ * - P1A: pinned to core 1, T=3000 ms, C=800 ms, D=T, tag 4
  *
  * Desired observations:
  * - Tags 1 and 2 should only ever appear on core 0's GPIO bank.
@@ -40,7 +46,7 @@ typedef struct MPPartBasicTaskConfig
 
 static TickType_t xMpPart1SharedAnchorTick = 0u;
 
-static void vMPPartBasicTask( void * pvParameters )
+static void Task1Task( void * pvParameters )
 {
     const MPPartBasicTaskConfig_t * pxCfg = ( const MPPartBasicTaskConfig_t * ) pvParameters;
     TickType_t xLastWakeTime;
@@ -52,7 +58,7 @@ static void vMPPartBasicTask( void * pvParameters )
 
     for( ;; )
     {
-        spin_ms( pxCfg->ulWcetMs );
+        spin_ms(TASK1_WORK);
 
         xDelayResult = xTaskDelayUntil( &xLastWakeTime,
                                         pdMS_TO_TICKS( pxCfg->ulPeriodMs ) );
@@ -64,39 +70,136 @@ static void vMPPartBasicTask( void * pvParameters )
     }
 }
 
+static void Task2Task( void * pvParameters )
+{
+    const MPPartBasicTaskConfig_t * pxCfg = ( const MPPartBasicTaskConfig_t * ) pvParameters;
+    TickType_t xLastWakeTime;
+    BaseType_t xDelayResult;
+
+    configASSERT( pxCfg != NULL );
+
+    xLastWakeTime = xMpPart1SharedAnchorTick;
+
+    for( ;; )
+    {
+        spin_ms(TASK2_WORK);
+
+        xDelayResult = xTaskDelayUntil( &xLastWakeTime,
+                                        pdMS_TO_TICKS( pxCfg->ulPeriodMs ) );
+
+        if( xDelayResult == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
+    }
+}
+
+
+static void Task3Task( void * pvParameters )
+{
+    const MPPartBasicTaskConfig_t * pxCfg = ( const MPPartBasicTaskConfig_t * ) pvParameters;
+    TickType_t xLastWakeTime;
+    BaseType_t xDelayResult;
+
+    configASSERT( pxCfg != NULL );
+
+    xLastWakeTime = xMpPart1SharedAnchorTick;
+
+    for( ;; )
+    {
+        spin_ms(TASK3_WORK);
+
+        xDelayResult = xTaskDelayUntil( &xLastWakeTime,
+                                        pdMS_TO_TICKS( pxCfg->ulPeriodMs ) );
+
+        if( xDelayResult == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
+    }
+}
+
+
 void mp_partitioned_edf_1_run( void )
 {
-    static const MPPartBasicTaskConfig_t xTaskCfgs[] =
+    static const MPPartBasicTaskConfig_t xTask1Cfg =
     {
-        { "P0A", 1u, 4000u, 1000u, ( UBaseType_t ) 1u << 0u },
-        { "P0B", 2u, 6000u, 900u, ( UBaseType_t ) 1u << 0u },
-        { "P1A", 4u, 5000u, 1000u, ( UBaseType_t ) 1u << 1u }
+        .pcName = "P0A",
+        .ulTag = 1u,
+        .ulPeriodMs = 4000u,
+        .ulWcetMs = TASK1_WORK,
+        .uxCoreAffinityMask = ( UBaseType_t ) 1u << 0u
     };
-    UBaseType_t uxIndex;
+    static const MPPartBasicTaskConfig_t xTask2Cfg =
+    {
+        .pcName = "P0B",
+        .ulTag = 2u,
+        .ulPeriodMs = 6000u,
+        .ulWcetMs = TASK2_WORK,
+        .uxCoreAffinityMask = ( UBaseType_t ) 1u << 0u
+    };
+    static const MPPartBasicTaskConfig_t xTask3Cfg =
+    {
+        .pcName = "P1A",
+        .ulTag = 4u,
+        .ulPeriodMs = 3000u,
+        .ulWcetMs = TASK3_WORK,
+        .uxCoreAffinityMask = ( UBaseType_t ) 1u << 1u
+    };
+    TaskHandle_t xTask1Handle = NULL;
+    TaskHandle_t xTask2Handle = NULL;
+    TaskHandle_t xTask3Handle = NULL;
 
     stdio_init_all();
     vTraceTaskPinsInit();
     xMpPart1SharedAnchorTick = xTaskGetTickCount();
 
-    for( uxIndex = 0u; uxIndex < ( UBaseType_t ) ( sizeof( xTaskCfgs ) / sizeof( xTaskCfgs[ 0 ] ) ); uxIndex++ )
+    ( void ) xTaskCreate( Task1Task,
+                          xTask1Cfg.pcName,
+                          PART1_STACK_DEPTH,
+                          ( void * ) &xTask1Cfg,
+                          &xTask1Handle,
+                          xTask1Cfg.ulPeriodMs,
+                          xTask1Cfg.ulWcetMs,
+                          xTask1Cfg.ulPeriodMs,
+                          xTask1Cfg.uxCoreAffinityMask );
+
+    ( void ) xTaskCreate( Task2Task,
+                          xTask2Cfg.pcName,
+                          PART1_STACK_DEPTH,
+                          ( void * ) &xTask2Cfg,
+                          &xTask2Handle,
+                          xTask2Cfg.ulPeriodMs,
+                          xTask2Cfg.ulWcetMs,
+                          xTask2Cfg.ulPeriodMs,
+                          xTask2Cfg.uxCoreAffinityMask );
+
+    ( void ) xTaskCreate( Task3Task,
+                          xTask3Cfg.pcName,
+                          PART1_STACK_DEPTH,
+                          ( void * ) &xTask3Cfg,
+                          &xTask3Handle,
+                          xTask3Cfg.ulPeriodMs,
+                          xTask3Cfg.ulWcetMs,
+                          xTask3Cfg.ulPeriodMs,
+                          xTask3Cfg.uxCoreAffinityMask );
+
+    if( xTask1Handle != NULL )
     {
-        TaskHandle_t xHandle = NULL;
+        vTaskSetApplicationTaskTag( xTask1Handle,
+                                    ( TaskHookFunction_t ) ( uintptr_t ) xTask1Cfg.ulTag );
+    }
 
-        ( void ) xTaskCreate( vMPPartBasicTask,
-                              xTaskCfgs[ uxIndex ].pcName,
-                              PART1_STACK_DEPTH,
-                              ( void * ) &xTaskCfgs[ uxIndex ],
-                              &xHandle,
-                              xTaskCfgs[ uxIndex ].ulPeriodMs,
-                              xTaskCfgs[ uxIndex ].ulWcetMs,
-                              xTaskCfgs[ uxIndex ].ulPeriodMs,
-                              xTaskCfgs[ uxIndex ].uxCoreAffinityMask );
+    if( xTask2Handle != NULL )
+    {
+        vTaskSetApplicationTaskTag( xTask2Handle,
+                                    ( TaskHookFunction_t ) ( uintptr_t ) xTask2Cfg.ulTag );
+    }
 
-        if( xHandle != NULL )
-        {
-            vTaskSetApplicationTaskTag( xHandle,
-                                        ( TaskHookFunction_t ) ( uintptr_t ) xTaskCfgs[ uxIndex ].ulTag );
-        }
+    if( xTask3Handle != NULL )
+    {
+        vTaskSetApplicationTaskTag( xTask3Handle,
+                                    ( TaskHookFunction_t ) ( uintptr_t ) xTask3Cfg.ulTag );
     }
 
     vTaskStartScheduler();

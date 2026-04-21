@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include "schedulingConfig.h"
+#include "FreeRTOSConfig.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -28,6 +28,9 @@
     #elif ( ( configUSE_MP == 1 ) && ( configUSE_UP == 0 ) )
         #include "mp_tests/test_1.h"
         #include "mp_tests/test_2.h"
+        #include "mp_tests/demo_tests/test_1_glob.h"
+        #include "mp_tests/demo_tests/test_1_part.h"
+        #include "mp_tests/demo_tests/test_2_dhall.h"
 
         #if ( PARTITIONED_EDF_ENABLE == 0U )
             #include "mp_tests/global_edf_tests/test_1.h"
@@ -82,7 +85,7 @@ int main( void )
     vTraceUsbSerialInit( 1500u );
     vTraceUsbPrint( "UART serial ready\r\n" );
 
-    
+
     #if ( configUSE_EDF == 1 )
         #if ( ( configUSE_UP == 1 ) && ( configUSE_MP == 0 ) )
             #if ( configUSE_CBS == 1 )
@@ -98,7 +101,7 @@ int main( void )
         // tie-break against periodic task on equal deadlines.
         // cbs_4_run();
         #elif ( configUSE_SRP == 1 )
-            // srp_1_run();
+            srp_1_run();
             // srp_2_run();
             // srp_3_run();
             // srp_4_run();
@@ -106,13 +109,13 @@ int main( void )
             // srp_6_run();
             #elif ( configUSE_SRP == 0 && configUSE_CBS == 0  && GLOBAL_EDF_ENABLE == 0U && PARTITIONED_EDF_ENABLE == 0U )
             // Simple edf implicit deadlinetest case with 3 tasks added at startup with a fairly low utilization.
-            // edf_1_run();
+            edf_1_run();
 
             // Higher utilization (but still < 1.0) edf implicit deadline test with 4 tasks added at startup.
             // edf_2_run();
 
             // EDF admission control test, attempts to add unschedulable task at startup and after 10s, then adds a schedulable task.
-            edf_3_run();
+            // edf_3_run();
 
             // Constrained deadline EDF test with 3 tasks (D != T).
             // edf_4_run();
@@ -139,25 +142,37 @@ int main( void )
 
             // Global EDF migration: one unrestricted task should appear on both cores across different jobs.
             // mp_global_edf_3_run();
+
+            // DEMO TESTING
+            // mp_demo_test_1_glob_run();
+            // mp_demo_test_2_dhall_run();
+
             #else
             // Partitioned EDF basic: tasks should only appear on their assigned core bank.
             // mp_partitioned_edf_1_run();
 
             // Partitioned EDF explicit migration: a task should move to the new core after affinity change.
             // mp_partitioned_edf_2_run();
+
+            // DEMO TEST
+            // mp_demo_test_1_part_run();
             #endif
 
             // MP EDF admission control using volatile pass/fail result flags.
             // mp_edf_admission_1_run();
 
             // MP EDF run-time task creation for the active MP scheduling mode.
-            mp_edf_runtime_create_1_run();
+            // mp_edf_runtime_create_1_run();
         #endif
     #endif
 
     for( ;; )
     {
     }
+}
+
+void vApplicationIdleHook( void )
+{
 }
 
 void vApplicationStackOverflowHook( TaskHandle_t xTask,

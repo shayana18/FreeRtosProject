@@ -21,6 +21,7 @@
 #define configUSE_PASSIVE_IDLE_HOOK                                 0
 #define configUSE_IDLE_HOOK                                         1
 #define configRUN_MULTIPLE_PRIORITIES                               1
+#define configTIMER_SERVICE_TASK_CORE_AFFINITY                      ( 1U << 0U )
 #else
 #define configNUMBER_OF_CORES                                       1
 #define configUSE_IDLE_HOOK                                         0
