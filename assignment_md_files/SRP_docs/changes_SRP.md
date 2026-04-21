@@ -2,7 +2,7 @@
 
 - Added SRP configuration flags in `schedulingConfig.h`, including `configUSE_SRP`, `configSRP_RESOURCE_TYPE_COUNT`, `configUSE_SRP_SHARED_STACKS`, `configSRP_SHARED_STACK_SIZE`, `configSRP_SHARED_STACK_GUARD_WORDS`, and `configSRP_SHARED_STACK_MAX_LEVELS`.
 - Extended `TCB_t` and `StaticTask_t` with SRP metadata such as task preemption level, requested stack depth, SRP registry list item, declared resource claims, and currently held resources.
-- Added `xReadySRPTasksList` as an EDF-ordered ready list for SRP tasks and `xSRPTaskRegistryList` as the kernel registry for SRP task metadata and ceiling recomputation.
+- Added `xReadySRPTasksList_UP` as an EDF-ordered ready list for SRP tasks and `xSRPTaskRegistryList_UP` as the kernel registry for SRP task metadata and ceiling recomputation.
 - Overloaded the EDF `xTaskCreate()` path again in EDF + SRP mode so the caller can provide an SRP claim table and the kernel can validate claim IDs, reject duplicates, and derive the task's preemption level from its relative deadline.
 - Added SRP ready-task selection logic so the scheduler scans the SRP ready list in deadline order and only chooses tasks that satisfy the current system-ceiling rule or are safe to resume while already holding resources.
 - Added `prvSRPRecomputeSystemCeiling()` so the per-resource blocking ceilings and the global `uxSystemCeiling` are recomputed whenever SRP task or resource state changes.

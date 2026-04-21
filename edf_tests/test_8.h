@@ -2,7 +2,7 @@
 
 #include "schedulingConfig.h"
 
-#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 0 ) )
+#if ( (configUSE_UP == 1) && ( configUSE_EDF == 1 ) && ( configUSE_SRP == 0 ) )
 /**
  * Run EDF test case 8 (7 one-hot tasks + intentional single-job misses):
  * - Creates seven periodic EDF tasks with one-hot task tags 1,2,4,8,16,32,64.

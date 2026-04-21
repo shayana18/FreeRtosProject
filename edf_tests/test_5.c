@@ -1,6 +1,6 @@
 #include "edf_tests/test_5.h"
 
-#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 0 ) )
+#if ( (configUSE_UP == 1) && ( configUSE_EDF == 1 ) && ( configUSE_SRP == 0 ) )
 
 #include <stdint.h>
 #include <stdio.h>
@@ -41,13 +41,15 @@
 #define T4_WCET_MS        1200u
 #define T4_DEADLINE_MS    10000u
 
+static TickType_t xEdf5SharedAnchorTick = 0u;
+
 static void Task1(void *pvParameters)
 {
     TickType_t xLastWakeTime;
     BaseType_t xDelayResult;
 
     (void) pvParameters;
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xEdf5SharedAnchorTick;
 
     for (;;)
     {
@@ -68,7 +70,7 @@ static void Task2(void *pvParameters)
     BaseType_t xDelayResult;
 
     (void) pvParameters;
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xEdf5SharedAnchorTick;
 
     for (;;)
     {
@@ -89,7 +91,7 @@ static void Task3(void *pvParameters)
     BaseType_t xDelayResult;
 
     (void) pvParameters;
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xEdf5SharedAnchorTick;
 
     for (;;)
     {
@@ -110,7 +112,7 @@ static void Task4(void *pvParameters)
     BaseType_t xDelayResult;
 
     (void) pvParameters;
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xEdf5SharedAnchorTick;
 
     for (;;)
     {
@@ -129,6 +131,7 @@ void edf_5_run(void)
 {
     stdio_init_all();
     vTraceTaskPinsInit();
+    xEdf5SharedAnchorTick = xTaskGetTickCount();
 
     TaskHandle_t xT1 = NULL;
     TaskHandle_t xT2 = NULL;

@@ -2,7 +2,7 @@
 
 #include "schedulingConfig.h"
 
-#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 0 ) )
+#if ( (configUSE_UP == 1) && ( configUSE_EDF == 1 ) && ( configUSE_SRP == 0 ) )
 /**
  * Run EDF test case 1.
  *

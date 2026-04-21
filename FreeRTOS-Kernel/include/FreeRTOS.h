@@ -3202,7 +3202,7 @@ typedef struct xSTATIC_TCB
         TickType_t xRelDeadline;             /**< Relative deadline in ticks. */
         TickType_t xAbsDeadline;             /**< Absolute deadline in ticks. */
         StaticListItem_t xEDFTaskListItem;   /**< Mirrors TCB_t::xEDFTaskListItem for static allocation size compatibility. */
-        #if ( configUSE_SRP == 1 )
+        #if ( ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
             UBaseType_t uxPriorityCeiling;       /**< Mirrors TCB_t::uxPriorityCeiling for static allocation size compatibility. */
             configSTACK_DEPTH_TYPE uxStackDepthWords; /**< Mirrors TCB_t::uxStackDepthWords for static allocation size compatibility. */
             StaticListItem_t xSRPTaskListItem;   /**< Mirrors TCB_t::xSRPTaskListItem for static allocation size compatibility. */
@@ -3211,6 +3211,11 @@ typedef struct xSTATIC_TCB
                 TickType_t xSRPResourceMaxCriticalSectionTicks[ configSRP_RESOURCE_TYPE_COUNT ];
                 UBaseType_t uxSRPResourceHeldCount[ configSRP_RESOURCE_TYPE_COUNT ];
             #endif
+        #endif
+        #if ( ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
+            void * pxCBSServer;                  /**< Mirrors TCB_t::pxCBSServer for static allocation size compatibility. */
+            BaseType_t xCBSJobOutstanding;       /**< Mirrors TCB_t::xCBSJobOutstanding for static allocation size compatibility. */
+            UBaseType_t uxCBSJobID;              /**< Mirrors TCB_t::uxCBSJobID for static allocation size compatibility. */
         #endif
     #endif
     

@@ -1,6 +1,6 @@
 #include "edf_tests/test_8.h"
 
-#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 0 ) )
+#if ( (configUSE_UP == 1) && ( configUSE_EDF == 1 ) && ( configUSE_SRP == 0 ) )
 
 #include <stdint.h>
 #include <stdio.h>
@@ -79,6 +79,8 @@ static Test8PeriodicMissTaskConfig_t xPeriodicMissTaskConfigs[] =
     { { "Test8 T7", 7u, T7_PERIOD_MS, T7_WCET_MS, T7_DEADLINE_MS, 140u, 4u }, 3u, 200u }
 };
 
+static TickType_t xEdf8SharedAnchorTick = 0u;
+
 static void vTest8AlwaysMeetTask( void * pvParameters )
 {
     const Test8TaskConfig_t * pxCfg = ( const Test8TaskConfig_t * ) pvParameters;
@@ -87,7 +89,7 @@ static void vTest8AlwaysMeetTask( void * pvParameters )
 
     configASSERT( pxCfg != NULL );
 
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xEdf8SharedAnchorTick;
 
     for( ;; )
     {
@@ -113,7 +115,7 @@ static void vTest8PeriodicMissTask( void * pvParameters )
 
     configASSERT( pxCfg != NULL );
 
-    xLastWakeTime = xTaskGetTickCount();
+    xLastWakeTime = xEdf8SharedAnchorTick;
 
     for( ;; )
     {
@@ -161,6 +163,7 @@ void edf_8_run( void )
 
     stdio_init_all();
     vTraceTaskPinsInit();
+    xEdf8SharedAnchorTick = xTaskGetTickCount();
 
     for( uxIndex = 0u;
          uxIndex < ( UBaseType_t ) ( sizeof( xAlwaysMeetTaskConfigs ) / sizeof( xAlwaysMeetTaskConfigs[ 0 ] ) );

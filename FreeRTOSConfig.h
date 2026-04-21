@@ -14,7 +14,19 @@
 #define configSYSTICK_CLOCK_HZ                                      1000000
 #define configTICK_RATE_HZ                                          250
 #define configMAX_PRIORITIES                                        5
+// MP support
+#if (configUSE_MP == 1)
+#define configUSE_CORE_AFFINITY                                     1
+#define configNUMBER_OF_CORES                                       2 /* Two cores for pico */
+#define configUSE_PASSIVE_IDLE_HOOK                                 0
+#define configUSE_IDLE_HOOK                                         1
+#define configRUN_MULTIPLE_PRIORITIES                               1
+#define configTIMER_SERVICE_TASK_CORE_AFFINITY                      ( 1U << 0U )
+#else
 #define configNUMBER_OF_CORES                                       1
+#define configUSE_IDLE_HOOK                                         0
+
+#endif
 #define configMINIMAL_STACK_SIZE                                    128
 #define configMAX_TASK_NAME_LEN                                     16
 #define configUSE_16_BIT_TICKS                                      0
@@ -46,7 +58,6 @@
 #define configKERNEL_PROVIDED_STATIC_MEMORY                         1
 
 /* Hook function related definitions. */
-#define configUSE_IDLE_HOOK                                 0
 #define configUSE_TICK_HOOK                                 0
 #define configCHECK_FOR_STACK_OVERFLOW                      2
 #define configUSE_MALLOC_FAILED_HOOK                        0
@@ -115,7 +126,7 @@
 #define INCLUDE_xTaskGetSchedulerState          1
 #define INCLUDE_xTaskGetCurrentTaskHandle       1
 #define INCLUDE_uxTaskGetStackHighWaterMark     0
-#define INCLUDE_uxTaskGetStackHighWaterMark2    0
+#define INCLUDE_uxTaskGetStackHighWaterMark2    1
 #define INCLUDE_xTaskGetIdleTaskHandle          0
 #define INCLUDE_eTaskGetState                   0
 #define INCLUDE_xTimerPendFunctionCall          1
