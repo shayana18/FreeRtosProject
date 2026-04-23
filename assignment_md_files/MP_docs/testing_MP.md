@@ -1,125 +1,77 @@
-# MP Hardware Testing Setup
-- In MP mode, both cores may switch tasks close together, so a single shared binary task-code bus is no longer safe for clear waveform interpretation.
-- To avoid races on the trace output, GPIO ownership should be partitioned by core:
-  - core 0 task-code bank: GPIO `2`, `3`, `4`
-  - core 0 task-switch strobe: GPIO `5`
-  - core 1 task-code bank: GPIO `6`, `7`, `8`
-  - core 1 task-switch strobe: GPIO `9`
-- A shared clock or switch pin is not recommended in MP mode. If both cores toggle the same strobe line, two logically separate switch events can collapse into one unreadable waveform. For that reason, this MP test plan uses one strobe pin per core.
-- The deadline-miss indicator can continue to use a separate dedicated GPIO, such as GPIO `15`, because it is not encoding per-core task identity.
-- With only three task-code pins per core, MP test task tags should stay in the range `0..7` so each core's displayed task ID remains readable in binary on the logic analyzer.
+# MP EDF testing
 
-# MP Test Plan
+The MP test strategy focuses on the behavior that is unique to multiprocessor scheduling: simultaneous dispatch on two cores, cross-core preemption, migration, partition ownership, admission control, and runtime task creation.
 
-## Global EDF basic dispatch
+## Hardware trace setup
 
-Use case:
-- verify that the two earliest-deadline ready jobs are dispatched simultaneously on the two cores
+In MP mode, both cores may switch tasks close together, so a single shared task-code bus is not reliable. The trace setup assigns each core its own GPIO bank:
 
-Expected observation:
-- one valid task code appears on core 0's GPIO bank
-- one valid task code appears on core 1's GPIO bank
-- the two displayed tasks should be the two earliest-deadline jobs in the test set
+- core 0 task-code bank: GPIO `2`, `3`, `4`
+- core 0 task-switch strobe: GPIO `5`
+- core 1 task-code bank: GPIO `6`, `7`, `8`
+- core 1 task-switch strobe: GPIO `9`
+- shared deadline-miss indicator: GPIO `15`
 
-## Global EDF preemption
+Each test task sets its application task tag to a small binary value. With three task-code pins per core, task tags are kept in the range `0..7` so the logic analyzer can decode which task is running on each core.
 
-Use case:
-- verify that when an earlier-deadline job is released, the kernel requests a reschedule on the correct core and replaces the currently running worse job
+## General method
 
-Expected observation:
-- after the earlier-deadline task is released, one core's displayed task code changes immediately
-- the replacement should match the earlier-deadline task
+- Use GPIO traces to verify dispatch, preemption, migration, and partition ownership.
+- Use `volatile` result flags for admission-control tests, where the important result is whether `xTaskCreate()` returned `pdPASS` or `pdFAIL`.
+- Keep global EDF and partitioned EDF tests separately guarded so only tests for the active MP policy compile into meaningful runtime code.
+- For small task sets, derive the expected schedule manually and compare the first few releases against the observed core banks.
+- For higher-utilization or admission-bound tests, focus on acceptance/rejection and the absence of unexpected deadline-miss signals rather than trying to hand-derive a long schedule.
 
-## Global EDF migration
+## Test cases
 
-Use case:
-- verify that unrestricted global EDF tasks are not pinned to one core and may execute on different cores across different jobs
+| Test | File / entry point | Scenario | Expected result | Status |
+| --- | --- | --- | --- | --- |
+| Global EDF basic dispatch | `mp_tests/global_edf_tests/test_1.c`, `mp_global_edf_1_run()` | Several unrestricted tasks are released at startup. | The two earliest-deadline ready jobs occupy the two cores; later-deadline tasks wait. | Implemented. GPIO pass criterion documented in source comments. |
+| Global EDF preemption | `mp_tests/global_edf_tests/test_2.c`, `mp_global_edf_2_run()` | An earlier-deadline job is released while worse jobs are running. | The kernel yields the correct core and replaces the worse running job. | Implemented. GPIO pass criterion documented in source comments. |
+| Global EDF migration | `mp_tests/global_edf_tests/test_3.c`, `mp_global_edf_3_run()` | A globally runnable task is allowed to execute in different jobs under changing interference. | The same unrestricted task can appear on different core banks across jobs. | Implemented. GPIO pass criterion documented in source comments. |
+| Partitioned EDF basic dispatch | `mp_tests/partitioned_edf_tests/test_1.c`, `mp_partitioned_edf_1_run()` | Tasks are created with explicit one-hot partition affinities. | Each task appears only on its assigned core's GPIO bank. | Implemented. GPIO pass criterion documented in source comments. |
+| Partitioned EDF explicit migration | `mp_tests/partitioned_edf_tests/test_2.c`, `mp_partitioned_edf_2_run()` | A controller changes a task's affinity from one core to another. | Before migration, the task appears only on the old core; after migration, it appears only on the new core. | Implemented. GPIO pass criterion documented in source comments. |
+| MP admission control | `mp_tests/test_1.c`, `mp_edf_admission_1_run()` | Runtime and startup task creation include both schedulable and unschedulable candidates. | Bad tasks return `pdFAIL`; good tasks return `pdPASS` and later appear on GPIO if admitted. | Implemented. Result flags stored in `volatile` variables. |
+| MP runtime task creation | `mp_tests/test_2.c`, `mp_edf_runtime_create_1_run()` | A controller creates tasks after the scheduler has started. | The admitted runtime task is inserted into the active MP EDF policy and can preempt normally; rejected task does not appear. | Implemented. Result flags stored in `volatile` variables. |
+| Global EDF demo | `mp_tests/demo_tests/test_1_glob.c`, `mp_demo_test_1_glob_run()` | Small global EDF task set with total utilization below one core. | Tasks remain globally runnable; the two earliest-deadline jobs can occupy both cores even though the total utilization is less than one. | Implemented. Designed for presentation/demo waveform. |
+| Partitioned EDF best-fit demo | `mp_tests/demo_tests/test_1_part.c`, `mp_demo_test_1_part_run()` | Three tasks are created without explicit affinity. | Online best-fit places the tasks on the partition that gives the highest safe post-insertion utilization. | Implemented. Designed for presentation/demo waveform. |
+| Conservative global admission demo | `mp_tests/demo_tests/test_2_dhall.c`, `mp_demo_test_2_dhall_run()` | Task set illustrates the gap between total capacity and the global EDF sufficient bound. | The candidate that violates `U_total <= m - (m - 1) U_max` is rejected even though raw capacity may look available. | Implemented. Result flags stored in `volatile` variables. |
 
-Expected observation:
-- structure releases so the same task can appear on core 0 in one job and later on core 1 in another job
-- this demonstrates migration under global EDF rather than static partition assignment
+## Build verification
 
-## Partitioned EDF basic
+The MP tests are configuration-dependent. To verify coverage, the project should be built at least once in each of these modes:
 
-Use case:
-- verify that partitioned EDF dispatches only from the assigned core's partition queue
+### Global EDF
 
-Expected observation:
-- each task should only ever appear on the GPIO bank of its assigned core
-- no task should spontaneously appear on the other core's bank unless its affinity is explicitly changed
+```c
+#define configUSE_EDF 1U
+#define configUSE_UP  0U
+#define configUSE_MP  1U
+#define configUSE_SRP 0U
+#define configUSE_CBS 0U
+#define GLOBAL_EDF_ENABLE 1U
+#define PARTITIONED_EDF_ENABLE 0U
+```
 
-## Partitioned EDF explicit migration
+### Partitioned EDF
 
-Use case:
-- verify that `vTaskCoreAffinitySet()` moves a partitioned EDF task into a new partition and that future jobs run only on the new core
+```c
+#define configUSE_EDF 1U
+#define configUSE_UP  0U
+#define configUSE_MP  1U
+#define configUSE_SRP 0U
+#define configUSE_CBS 0U
+#define GLOBAL_EDF_ENABLE 0U
+#define PARTITIONED_EDF_ENABLE 1U
+```
 
-Expected observation:
-- a controller task changes the task's one-hot affinity mask
-- after migration, the task stops appearing on the old core's GPIO bank
-- later executions appear only on the new core's bank
+The documentation review build check was run in both MP modes:
 
-## Admission control
+- Global EDF: `cmake --build build` completed successfully with the global EDF configuration active.
+- Partitioned EDF: `cmake --build build` completed successfully and linked `FreeRtosProject.elf` with the partitioned EDF configuration active.
 
-Timing note:
-- In admission tests that use a separate controller task to create tasks at runtime, observed creation timing is not always exactly as predicted.
-- If the controller task has a large deadline, it can be delayed while other runnable tasks execute.
+These build checks only verify that each MP policy compiles and links. The GPIO waveform expectations above still require a board run and logic-analyzer capture for full runtime validation.
 
-Use case:
-- verify acceptance and rejection behavior without overloading the GPIO trace with non-scheduling metadata
+## Pass/fail interpretation
 
-Method:
-- reuse the same style as `edf_tests/test_3.c`
-- store create-time results in `volatile` variables
-- use GPIO only to validate runtime scheduling of accepted tasks
-
-## Run-time task creation
-
-Use case:
-- verify that MP EDF admission, registration, ready-list insertion, and preemption still work when tasks are created after the scheduler has already started
-
-Expected observation:
-- a controller task creates a new periodic task at runtime
-- if admitted, it should appear on the appropriate core bank(s) and preempt according to the active MP EDF policy
-- if rejected, the `volatile` result flag should record failure and no new GPIO task code should appear
-
-## Two-task partitioned first-fit test
-
-Use case:
-- verify the simple online partition placement rule with an easy hand-checkable case
-
-Method:
-- create two partitioned EDF tasks whose combined utilization still fits on one core
-- the expected placement is that both are accepted onto core 0 by the current first-fit style placement rule
-
-Expected observation:
-- both task codes appear only on core 0's GPIO bank
-- core 1 should remain idle for this test
-
-## Dhall-effect test
-
-Use case:
-- demonstrate that MP EDF admission uses conservative sufficient bounds rather than exact schedulability tests
-
-Method:
-- create a task set that illustrates the gap between raw multicore capacity and the implemented sufficient admission condition
-- the point of the test is not to prove an exact Dhall impossibility result, but to show that the chosen admission control intentionally limits what the kernel accepts
-
-Expected observation:
-- the task set is rejected by admission control
-- the rejection is recorded through `volatile` result flags
-
-## Near-full-utilization scheduling
-
-Use case:
-- verify that the MP EDF implementation remains stable when utilization is close to the implemented admission bound
-
-Expected observation:
-- tasks continue to alternate correctly on the two core banks
-- no unexpected deadline-miss signal should appear during the observation window
-
-# MP Test Method
-
-- For small MP task sets, derive the expected first several seconds of the schedule by hand and compare the observed core-0 and core-1 GPIO banks against that expected behavior.
-- For migration and preemption tests, focus on the exact release instant that should trigger a reschedule and confirm that the correct core changes state.
-- For admission-control tests, use `volatile` pass/fail variables as the primary result and use GPIO only to confirm the behavior of accepted tasks.
-- For higher-utilization tests, prioritize checking for deadline-miss signals and correct core ownership of tasks rather than trying to hand-derive a very long exact schedule.
+A scheduling test is considered passing when the observed GPIO waveform matches the expected EDF ordering and core ownership described by the test. An admission-control test is considered passing when the expected `pdPASS` / `pdFAIL` values are recorded in the volatile result variables and rejected tasks never appear on the GPIO task-code banks.

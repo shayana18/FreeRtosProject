@@ -1,3 +1,24 @@
-This EDF implementation replaces FreeRTOS's fixed-priority choice of "run the highest-priority ready task" with "run the ready task whose absolute deadline is earliest." To do that with minimal intrusion, the kernel was extended with a dedicated EDF ready list sorted by absolute deadline and an EDF task registry list that stores all admitted EDF tasks. The task control block was extended with the timing information EDF needs at runtime: period, WCET, relative deadline, absolute release time, absolute deadline, and per-job execution time. In EDF mode, `xTaskCreate()` is overloaded so task creation becomes the place where the kernel converts user timing parameters to ticks, validates the task model, runs admission control, initializes the EDF fields, and inserts the task into the EDF data structures.
+# EDF design
 
-Periodic job management is handled by the existing FreeRTOS timing paths rather than by building a second scheduler from scratch. `xTaskDelayUntil()` was extended so that when an EDF task finishes a job and waits for its next period, the kernel also updates the task's next absolute release time and absolute deadline and resets the per-job execution counter. `xTaskIncrementTick()` was extended to account for runtime budget consumption of the currently executing EDF task; if the job reaches its WCET or continues past its deadline, the task is stopped and delayed until its next release. Admission control is split by task-set type: implicit-deadline task sets use utilization under EDF, while constrained-deadline task sets use processor-demand analysis. To keep the Task 1 EDF implementation minimally intrusive and avoid rewriting FreeRTOS's synchronization and blocking subsystems, the design is intentionally limited to independent periodic tasks and does not attempt to make mutexes, semaphores, or other shared-resource paths EDF-aware; that is deferred to the later SRP extension.
+This EDF implementation changes the scheduling decision from "run the highest-priority ready task" to "run the ready task with the earliest absolute deadline." The main kernel structure added for this is a ready list sorted by absolute deadline. A second EDF registry list stores all admitted EDF tasks so the kernel can run admission checks and update periodic release metadata.
+
+The task control block was extended with the timing fields EDF needs at runtime:
+
+- period
+- WCET
+- relative deadline
+- absolute release time
+- absolute deadline
+- execution time used by the current job
+- EDF registry list item
+
+In EDF mode, `xTaskCreate()` is overloaded so the existing task creation entry point accepts timing parameters instead of a fixed priority. This was chosen to keep the user-facing API familiar: users still create tasks through `xTaskCreate()`, but the function signature changes based on the selected scheduler configuration. Task creation is also the right place to validate the task model, convert timing values to ticks, run admission control, and insert the task into the EDF data structures.
+
+Periodic job management reuses the existing FreeRTOS timing paths instead of adding a separate scheduler loop. `xTaskDelayUntil()` was extended so that when an EDF task finishes a job and waits for its next period, the kernel also updates the next release time, refreshes the absolute deadline, and resets the execution counter. `xTaskIncrementTick()` was extended to charge execution time to the running EDF task. If a job reaches its WCET or runs past its deadline, the kernel stops that job and delays the task until its next release.
+
+Admission control depends on the task set:
+
+- implicit-deadline task sets use the standard EDF utilization test
+- constrained-deadline task sets use processor-demand analysis
+
+This keeps the Task 1 implementation focused on the required EDF behavior: deadline-ordered dispatch, admission control, runtime task creation, and deadline-miss/overrun handling.

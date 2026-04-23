@@ -1,6 +1,7 @@
-# CBS Design
+# CBS design
 
 ## Scope and goals
+
 CBS support is implemented on top of EDF to serve soft aperiodic work without breaking periodic hard real-time behavior.
 
 Covered requirements from the assignment:
@@ -14,12 +15,15 @@ Covered requirements from the assignment:
 - One-job-at-a-time per CBS worker is enforced (no next release before completion).
 
 ## Why `cbs.c`/`cbs.h` is separated
-Separating CBS into `cbs.c`/`cbs.h` made integration easier and safer:
-- Isolated policy code: server rules (reset/replenish/admission) are in one module, not spread through kernel internals.
-- Narrow kernel touch points: `tasks.c` only exposes small CBS hooks (`bind`, `outstanding job`, `deadline update`).
-- Lower regression risk: CBS logic can evolve without repeatedly editing core scheduler paths.
-- Cleaner API for tests/apps: CBS calls are discoverable in one header.
-- Easier debugging: CBS state (`budget`, `deadline`, `running`) is centralized.
+
+CBS is kept in `cbs.c`/`cbs.h` because it behaves more like a reservation subsystem than a normal periodic task extension. EDF and SRP mainly change which ready task is selected, but CBS also has server state, submitted jobs, budget exhaustion, and deadline postponement rules. Keeping that logic in one module made the implementation easier to reason about.
+
+The main benefits of this split are:
+
+- Server rules such as reset, replenishment, admission, and budget exhaustion stay in one place.
+- `tasks.c` only needs small hooks for binding a task to a server, checking outstanding work, and refreshing a server task's deadline.
+- CBS can be tested and debugged without repeatedly changing the core scheduler paths.
+- Application and test code gets one clear CBS header instead of several scattered kernel entry points.
 
 ## Public CBS API (`cbs.h`)
 - `xCBSServerCreate(Q_ticks, T_ticks, name)`: validates params, allocates server, initializes budget/deadline.
@@ -47,6 +51,7 @@ TCB extensions for CBS-enabled EDF builds:
 - `uxCBSJobID`
 
 ## Runtime behavior summary
+
 1. Create server with capacity/period and create a bound worker task.
 2. Application code can add aperiodic work at runtime by calling `xCBSSubmitJob` on an existing CBS worker.
 3. `xCBSSubmitJob` accepts one outstanding job per worker, updates server deadline/budget if CBS arrival rule triggers, and wakes worker.
@@ -54,7 +59,8 @@ TCB extensions for CBS-enabled EDF builds:
 5. On budget exhaustion, deadline is postponed by one period and ready-list position is refreshed.
 6. Worker calls `xCBSCompleteJob` when done, enabling next submission.
 
-## Notes and current limits
-- Admission control is intentionally simple (utilization test), not a full demand-bound CBS feasibility analysis.
-- Current model is single outstanding job per worker task by design.
-- CBS is compiled only with EDF enabled.
+## Design assumptions
+
+- Admission control uses a simple utilization test. This was chosen because the utilization test is easy to validate and fits the project scope.
+- Each worker has at most one outstanding job. This matches the assignment simplification that a new job is not released until the previous job of the same task is complete.
+- CBS is compiled only with EDF enabled because CBS relies on dynamic server deadlines to participate in EDF scheduling.

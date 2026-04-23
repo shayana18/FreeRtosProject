@@ -8204,8 +8204,8 @@ BaseType_t xTaskIncrementTick( void )
                     }
                 }
                 #endif
-            #endif
         }
+        #endif /* configUSE_EDF == 1 */
         if( xConstTickCount == ( TickType_t ) 0U )
         {
             taskSWITCH_DELAYED_LISTS();

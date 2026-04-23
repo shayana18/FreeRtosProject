@@ -1,8 +1,14 @@
 
-// Uniprocessing vs multiprocessing selection
+/* Scheduler extension selection.
+ *
+ * If every flag in this block is 0U, the EDF/SRP/CBS/MP extensions compile
+ * out and the kernel uses the stock FreeRTOS fixed-priority scheduler.
+ * configUSE_UP and configUSE_MP select the EDF execution model only when
+ * configUSE_EDF == 1U.
+ */
 #define configUSE_UP  1U
 #define configUSE_MP  0U
-// EDF selection (if not use stock FP implementation for UP and MP)
+// EDF selection. If 0U, use the stock FreeRTOS fixed-priority scheduler.
 #define configUSE_EDF 1U
 // Uniprocessor scheduling config
 #define configUSE_SRP 1
