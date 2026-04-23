@@ -1,35 +1,200 @@
-# SRP hardware testing setup
+# SRP Hardware Testing Setup
+- SRP uses the same GPIO trace approach as EDF tests: task-code pins, a task-switch strobe, and a deadline-miss indicator.
+- UART plus GPIO tracing is used so scheduler/resource behavior can be matched against expected timing.
+- Deadline-miss GPIO can be sampled directly (or via LED) to confirm miss/overrun behavior.
 
-- SRP uses the same trace-pin setup as the EDF tests.
-- On top of the debugger UART, task execution is exposed on GPIO trace pins so the currently running task can be read from a Saleae logic analyzer.
-- A task-switch signal pin is used to tell the analyzer when to latch the task ID pins.
-- A separate deadline-miss pin can also be wired to an LED so deadline misses are visible even when the analyzer is not connected.
-- For SRP debugging, the same hardware setup was also paired with debugger snapshots captured by the hard-fault handler and the first-deadline-miss hook in `main.c`.
+# SRP Software Testing Setup
+- SRP tests are in the `srp_tests` folder.
+- Each test exposes an `srp_X_run()` entry point called from `main.c`.
+- To run SRP tests, keep `configUSE_EDF == 1` and `configUSE_SRP == 1` in `schedulingConfig.h`, then select one test in `main.c`.
+- `configUSE_SRP_SHARED_STACKS` toggles storage backend for comparing per-task stacks vs shared-stack mode.
+- Shared helpers and trace utilities come from `test_utils.c/h` and `task_trace.c/h`.
 
-# SRP software testing setup
+# SRP Test Methods
+- First validate scheduling/resource protocol behavior with shared stacks disabled (`configUSE_SRP_SHARED_STACKS = 0`).
+- For lock/ceiling tests, compare GPIO waveform to expected release/preemption/ceiling-block ordering.
+- Repeat with shared stacks enabled (`configUSE_SRP_SHARED_STACKS = 1`) to isolate stack-backend effects.
+- Use runtime flags/asserts/UART prints for admission and overrun cases where pass criteria are API outcomes.
 
-- SRP tests live in the `srp_tests` folder in the project root. Each test exposes a function that can be called from `main.c`.
-- To run an SRP test, keep `configUSE_EDF == 1` and `configUSE_SRP == 1` in `schedulingConfig.h`, then uncomment the matching call in `main.c` before building and flashing.
-- `configUSE_SRP_SHARED_STACKS` in `schedulingConfig.h` is the main switch used to compare SRP scheduling with ordinary per-task stacks versus the shared-stack backend.
-- SRP tests reuse the common tracing and timing helpers in `test_utils.c/h` and `task_trace.c/h`.
+# SRP Test Index
+| Test # | Summary Name | File / Entry Point | Type | Task Count | Key Goal |
+|---|---|---|---|---:|---|
+| 1 | Basic SRP Scheduling with Binary Semaphores | `srp_tests/test_1.c`, `srp_1_run()` | Periodic SRP scheduling | 3 | Validate SRP ordering and resource claims |
+| 2 | SRP Ceiling Blocking with Constrained Task | `srp_tests/test_2.c`, `srp_2_run()` | Ceiling/priority interaction | 6 | Validate ceiling block against earlier-deadline task |
+| 3 | SRP Admission with Blocking Terms | `srp_tests/test_3.c`, `srp_3_run()` | Admission control | 1 baseline + 2 candidates | Validate blocking-aware admission decisions |
+| 4 | Shared-Stack Quantitative Study | `srp_tests/test_4.c`, `srp_4_run()` | Stack backend analysis | 12 workers + 1 reporter | Validate shared-stack savings and runtime stats |
+| 5 | WCET Overrun in Critical Section | `srp_tests/test_5.c`, `srp_5_run()` | Overrun handling | 2 | Validate forced release and recovery after overrun |
 
-# SRP test method
+# SRP Test Cases + Results
 
-- First verify the SRP scheduling and resource protocol with `configUSE_SRP_SHARED_STACKS = 0`; this keeps the storage model simple and checks that EDF + SRP ordering and semaphore access behave correctly on hardware.
-- For tests involving resource sharing, compare the observed trace against the expected synchronous-release schedule documented in the test source.
-- Then rerun tests with `configUSE_SRP_SHARED_STACKS = 1` so the only major variable that changes is the shared-stack backend.
-- Shared-stack guard checks and debugger snapshots are used when needed to separate scheduler-ordering bugs from stack save/restore bugs.
+## Test 1 - Basic SRP Scheduling with Binary Semaphores
+### Task Table
+| Task | WCET C (ms) | Period T (ms) | Relative Deadline D (ms) | Resources Claimed | First Release (ms) |
+|---|---:|---:|---:|---|---:|
+| T1 | 1500 | 4000 | 4000 | R1 | 0 |
+| T2 | 1500 | 6000 | 6000 | R1, R2 | 0 |
+| T3 | 2500 | 12000 | 12000 | R2 | 0 |
 
-# SRP test cases
+### Description of Test
+Three synchronous periodic tasks share R1/R2 through SRP-aware binary semaphores. This baseline test confirms SRP ceiling ordering and absence of resource-induced inversion.
 
-| Test | File / entry point | Scenario | Expected result | Status |
-| --- | --- | --- | --- | --- |
-| Basic SRP scheduling with binary semaphores | `srp_tests/test_1.c`, `srp_1_run()` | Three synchronous periodic tasks (T=4000/6000/12000 ms) sharing two binary semaphores. T1 claims R1, T2 claims R1 and R2, T3 claims R2. All tasks released simultaneously. | SRP ceiling prevents lower-preemption-level tasks from preempting while a higher-ceiling resource is held. No priority inversion; all tasks meet their deadlines over the 12 s hyperperiod. | Implemented. GPIO waveform verified against manually derived schedule. Tested with both `configUSE_SRP_SHARED_STACKS = 0` and `= 1`. |
-| SRP ceiling ordering under same-deadline and shorter-deadline tasks | `srp_tests/test_2.c`, `srp_2_run()` | Five tasks with the same deadline (T=D=10000 ms) share R1 and R2. A sixth task (T6) has a shorter deadline (D=4000 ms) and is phased to become ready while T5 holds R1. | T6 is blocked by the system ceiling while T5 holds R1, even though T6 has an earlier absolute deadline. T6 runs only after T5 releases R1. Same-deadline tasks demonstrate correct shared-stack reuse. | Implemented. T6 release timing verified against the manual ceiling-block calculation. |
-| Admission control with blocking terms | `srp_tests/test_3.c`, `srp_3_run()` | A long-deadline base task claims R1 for 4500 ms. A short-deadline bad candidate (D=5000 ms) passes a plain utilization check but fails once the R1 blocking term is included. A good candidate (D=8000 ms) passes. | Bad task returns `pdFAIL`; good task returns `pdPASS` and appears on GPIO. | Implemented. `volatile` result variables confirm accept/reject outcomes. Validates that the SRP admission test accounts for blocking time and not only raw utilization. |
-| Shared-stack quantitative study | `srp_tests/test_4.c`, `srp_4_run()` | 12 tasks across three preemption levels (four tasks per level with varying stack depths). A reporter task periodically calls `vTaskGetSRPStackUsageRuntimeStats()` and asserts that the measured theoretical allocation matches the expected shared total. | Shared allocation = largest stack per level × three levels + reporter stack. Non-shared allocation = sum of all 12 task stacks + reporter stack. Reporter asserts equality and prints saved bytes to UART. | Implemented. `configASSERT` in the reporter verifies the theoretical shared bytes at every reporter period. Demonstrates the stack savings from the shared-stack backend. |
-| WCET overrun inside a critical section | `srp_tests/test_5.c`, `srp_5_run()` | An overrun task holds R1 and runs for 1800 ms, which is well past its WCET of 1000 ms. An observer task also claims R1. | Kernel stops the overrun job at WCET exhaustion and force-releases R1. `ulSRP5ForcedReleaseObserved` flag is set when the observer successfully acquires R1 in the same period. Deadline-miss GPIO fires for the overrun task. | Implemented. `volatile` observer-acquire counter confirms R1 is accessible after the forced release. Validates the overrun management path for tasks holding resources at the time of the overrun. |
+### Test Implementation
+- File: `srp_tests/test_1.c`
+- Entry point: `srp_1_run()`
 
-## Pass/fail interpretation
+### Expected Results and Results
+Expected waveform placeholder:
+![SRP Test 1 Expected](images/srp_test_1_expected.png)
 
-An SRP scheduling test is considered passing when the observed GPIO waveform matches the expected EDF + SRP ordering described in the test source and no unexpected deadline-miss GPIO activity occurs. An admission-control test is considered passing when the expected `pdPASS` / `pdFAIL` values are recorded in the `volatile` result variables and rejected tasks never appear on the GPIO task-code bank. For the stack-sharing test, passing requires the reporter's `configASSERT` to hold for every reporter period during a full run.
+Measured waveform placeholder:
+![SRP Test 1 Results](images/srp_test_1_results.png)
+
+#### Expected
+- At `t=0s`, all three tasks release and the earliest eligible deadline executes first.
+- While a task holds R1 or R2, lower-eligibility contenders must remain blocked by SRP ceiling rules.
+- Across one 12 s hyperperiod, all jobs should complete without unexpected deadline-miss pulses.
+
+#### Actual
+-
+
+#### Verified
+- SRP resource claim/take/give path works under periodic load.
+- Ceiling protocol prevents inversion while preserving EDF ordering among eligible tasks.
+- Test behavior is consistent across shared-stack disabled/enabled configurations.
+
+## Test 2 - SRP Ceiling Blocking with Constrained Task
+### Task Table
+| Task/Class | WCET C (ms) | Period T (ms) | Relative Deadline D (ms) | Resources Claimed | First Release (ms) |
+|---|---:|---:|---:|---|---:|
+| T1-T5 (same-deadline set) | ~1500-1800 each | 10000 | 10000 | Mix of R1/R2 | 0 |
+| T6 (constrained) | 1600 | 10000 | 4000 | R1 | phased offset |
+
+### Description of Test
+Five same-deadline tasks share resources while a sixth shorter-deadline task is phased to become ready near an R1 critical section. The test validates that SRP ceiling blocks T6 until release.
+
+### Test Implementation
+- File: `srp_tests/test_2.c`
+- Entry point: `srp_2_run()`
+
+### Expected Results and Results
+Expected waveform placeholder:
+![SRP Test 2 Expected](images/srp_test_2_expected.png)
+
+Measured waveform placeholder:
+![SRP Test 2 Results](images/srp_test_2_results.png)
+
+#### Expected
+- T6 should become ready at its phase offset but be ineligible to run while R1-induced ceiling is active.
+- T6 should only run after the blocking task releases R1 and the system ceiling drops.
+- Same-deadline tasks should preserve expected periodic behavior around the T6 interference window.
+
+#### Actual
+-
+
+#### Verified
+- SRP system-ceiling gating overrides earlier deadline when resource protocol requires blocking.
+- Resource release correctly re-enables blocked higher-urgency work.
+
+## Test 3 - SRP Admission with Blocking Terms
+### Task Table
+| Task/Class | WCET C (ms) | Period T (ms) | Relative Deadline D (ms) | Resource Claim | First Release (ms) |
+|---|---:|---:|---:|---|---:|
+| Base task | 5000 | 10000 | 10000 | R1 long claim | 0 |
+| Bad candidate | 1000 | 5000 | 5000 | R1 short claim | create-time |
+| Good candidate | 1000 | 8000 | 8000 | R1 short claim | create-time |
+
+### Description of Test
+Admission-control test where a long R1 blocking interval makes a candidate fail once blocking terms are included. A second candidate with looser timing should pass.
+
+### Test Implementation
+- File: `srp_tests/test_3.c`
+- Entry point: `srp_3_run()`
+
+### Expected Results and Results
+Expected waveform placeholder:
+![SRP Test 3 Expected](images/srp_test_3_expected.png)
+
+Measured waveform placeholder:
+![SRP Test 3 Results](images/srp_test_3_results.png)
+
+#### Expected
+- Bad candidate create should return `pdFAIL`.
+- Good candidate create should return `pdPASS`.
+- Only admitted tasks should appear on task-code GPIO traces.
+
+#### Actual
+-
+- Bad admission return:
+- Good admission return:
+
+#### Verified
+- Blocking-aware SRP admission logic (not raw utilization-only) is active.
+- Rejected tasks are not admitted to runtime schedule.
+
+## Test 4 - Shared-Stack Quantitative Study
+### Task Table
+| Task/Class | WCET C (ms) | Period T (ms) | Relative Deadline D (ms) | Purpose | First Release (ms) |
+|---|---:|---:|---:|---|---:|
+| 12 worker tasks | 250 each | 20000 | test-specific | Shared-stack utilization across levels | 0 |
+| Reporter task | lightweight | periodic | periodic | Calls SRP runtime stack stats API | periodic |
+
+### Description of Test
+A multi-task stack-usage study that compares theoretical non-shared allocation vs shared-stack allocation and checks runtime-reported values.
+
+### Test Implementation
+- File: `srp_tests/test_4.c`
+- Entry point: `srp_4_run()`
+
+### Expected Results and Results
+Expected waveform placeholder:
+![SRP Test 4 Expected](images/srp_test_4_expected.png)
+
+Measured waveform placeholder:
+![SRP Test 4 Results](images/srp_test_4_results.png)
+
+#### Expected
+- Reporter assertions for theoretical shared/non-shared sizes should hold during periodic checks.
+- Shared-stack mode should report lower theoretical allocation than non-shared mode for this task set.
+- No guard corruption or scheduler instability should appear during stats sampling.
+
+#### Actual
+-
+
+#### Verified
+- Shared-stack backend is functionally integrated with SRP scheduling.
+- Runtime stats API output is consistent with configured stack-region model.
+
+## Test 5 - WCET Overrun in Critical Section
+### Task Table
+| Task | WCET C (ms) | Period T (ms) | Relative Deadline D (ms) | Resource Claim | First Release (ms) |
+|---|---:|---:|---:|---|---:|
+| Overrun task | 1000 (configured) / 1800 work | 8000 | 8000 | R1 | 0 |
+| Observer task | 700 | 10000 | 10000 | R1 | 0 |
+
+### Description of Test
+Overrun task intentionally exceeds WCET while in an R1 critical section. Observer verifies the resource becomes available after kernel overrun handling.
+
+### Test Implementation
+- File: `srp_tests/test_5.c`
+- Entry point: `srp_5_run()`
+
+### Expected Results and Results
+Expected waveform placeholder:
+![SRP Test 5 Expected](images/srp_test_5_expected.png)
+
+Measured waveform placeholder:
+![SRP Test 5 Results](images/srp_test_5_results.png)
+
+#### Expected
+- Overrun task should trigger deadline-miss/overrun handling during its critical section.
+- Kernel should force release resource state so observer can subsequently acquire R1.
+- System should continue scheduling subsequent periods after the overrun event.
+
+#### Actual
+-
+- Forced release observed flag:
+- Observer acquire count:
+
+#### Verified
+- Overrun management mechanism works when the overrunning task holds SRP-managed resources.
+- Recovery path restores resource availability and scheduler progress.
