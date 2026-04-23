@@ -27,7 +27,7 @@
 | 6 | Constrained Admission Control | `edf_tests/test_6.c`, `edf_6_run()` | Constrained deadline + runtime create | 2 baseline + candidates | Validate DBF-style constrained admission path |
 | 7 | Implicit Admission Control (Utilization Path) | `edf_tests/test_7.c`, `edf_7_run()` | Implicit deadline + runtime create | 2 baseline + candidates | Validate implicit-deadline utilization admission path |
 | 8 | Seven-Task Mixed Miss/No-Miss Pattern | `edf_tests/test_8.c`, `edf_8_run()` | Mixed deadlines | 7 | Validate controlled periodic deadline misses |
-| 9 | 100-Task Constrained Deadline Stress Test | `edf_tests/test_9.c`, `edf_9_run()` | Constrained deadline stress | 100 | Validate scalability and scheduling stability |
+| 9 | 100-Task Constrained Deadline Stress Test | `edf_tests/test_9.c`, `edf_9_run()` | Constrained deadline stress | 100 | Validate requirement of being able to schedule and run 100 tasks |
 
 # EDF Test Cases + Results
 

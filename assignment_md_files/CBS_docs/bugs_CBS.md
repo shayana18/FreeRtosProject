@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 # CBS bugs and fixed issues
-=======
-# CBS Bugs Fixed During Development 
->>>>>>> b44896a (added edf testing template and some bug info for cbs)
 
 ## Fixed issue: CBS/kernel layout mismatch
 
