@@ -10,10 +10,12 @@
 #if ( configUSE_EDF == 1 )
     #if ( ( configUSE_UP == 1 ) && ( configUSE_MP == 0 ) )
         #if ( configUSE_CBS == 1 )
+            #include "cbs_tests/test_1.h"
             #include "cbs_tests/test_2.h"
             #include "cbs_tests/test_3.h"
-        #include "cbs_tests/test_4.h"
-    #elif ( configUSE_SRP == 0 )
+            #include "cbs_tests/test_4.h"
+            #include "cbs_tests/test_5.h"
+        #elif ( configUSE_SRP == 0 )
             #include "edf_tests/test_1.h"
             #include "edf_tests/test_2.h"
             #include "edf_tests/test_3.h"
@@ -26,6 +28,9 @@
         #elif ( configUSE_SRP == 1 )
             #include "srp_tests/test_1.h"
             #include "srp_tests/test_2.h"
+            #include "srp_tests/test_3.h"
+            #include "srp_tests/test_4.h"
+            #include "srp_tests/test_5.h"
         #endif
     #elif ( ( configUSE_MP == 1 ) && ( configUSE_UP == 0 ) )
         #include "mp_tests/test_1.h"
@@ -38,10 +43,21 @@
             #include "mp_tests/global_edf_tests/test_1.h"
             #include "mp_tests/global_edf_tests/test_2.h"
             #include "mp_tests/global_edf_tests/test_3.h"
+            #include "mp_tests/global_edf_tests/test_4.h"
+            #include "mp_tests/global_edf_tests/test_5.h"
         #else
             #include "mp_tests/partitioned_edf_tests/test_1.h"
             #include "mp_tests/partitioned_edf_tests/test_2.h"
+            #include "mp_tests/partitioned_edf_tests/test_3.h"
         #endif
+    #endif
+#else
+    #if ( ( configUSE_UP == 0U ) && ( configUSE_MP == 0U ) && \
+          ( configUSE_SRP == 0U ) && ( configUSE_CBS == 0U ) && \
+          ( GLOBAL_EDF_ENABLE == 0U ) && ( PARTITIONED_EDF_ENABLE == 0U ) && \
+          ( configUSE_SRP_SHARED_STACKS == 0U ) )
+        #include "regression_tests/fixed_priority_test_1.h"
+        #include "regression_tests/fixed_priority_test_2.h"
     #endif
 #endif
 
@@ -102,9 +118,18 @@ int main( void )
         // One CBS server with four aperiodic job-source tasks; asserts CBS wins
         // tie-break against periodic task on equal deadlines.
         // cbs_4_run();
+        // CBS admission rejection plus one-outstanding-job rejection test.
+        // cbs_5_run();
         #elif ( configUSE_SRP == 1 )
             // srp_1_run();
+            // SRP shared-resource ordering test.
             srp_2_run();
+            // SRP admission control with blocking terms.
+            // srp_3_run();
+            // SRP shared-stack quantitative accounting study.
+            // srp_4_run();
+            // SRP WCET overrun while holding a resource.
+            // srp_5_run();
             #elif ( configUSE_SRP == 0 && configUSE_CBS == 0  && GLOBAL_EDF_ENABLE == 0U && PARTITIONED_EDF_ENABLE == 0U )
             // Simple edf implicit deadlinetest case with 3 tasks added at startup with a fairly low utilization.
             // edf_1_run();
@@ -144,9 +169,16 @@ int main( void )
             // Global EDF migration: one unrestricted task should appear on both cores across different jobs.
             // mp_global_edf_3_run();
 
+            // Global EDF MP WCET-overrun UART trace test.
+            // mp_global_edf_4_run();
+
+            // Global EDF affinity enforcement: pinned tasks must stay on their assigned core
+            // while unrestricted tasks migrate freely. Hyperperiod 12 s.
+            // mp_global_edf_5_run();
+
             // DEMO TESTING
-            mp_demo_test_1_glob_run();
-            // mp_demo_test_2_dhall_run();
+            mp_compare_glob_run();
+            // mp_test_dhall_run();
 
             #else
             // Partitioned EDF basic: tasks should only appear on their assigned core bank.
@@ -155,8 +187,11 @@ int main( void )
             // Partitioned EDF explicit migration: a task should move to the new core after affinity change.
             // mp_partitioned_edf_2_run();
 
+            // Partitioned EDF MP WCET-overrun UART trace test.
+            // mp_partitioned_edf_3_run();
+
             // DEMO TEST
-            // mp_demo_test_1_part_run();
+            // mp_compare_part_run();
             #endif
 
             // MP EDF admission control using volatile pass/fail result flags.
@@ -164,6 +199,16 @@ int main( void )
 
             // MP EDF run-time task creation for the active MP scheduling mode.
             // mp_edf_runtime_create_1_run();
+        #endif
+    #else
+        #if ( ( configUSE_UP == 0U ) && ( configUSE_MP == 0U ) && \
+              ( configUSE_SRP == 0U ) && ( configUSE_CBS == 0U ) && \
+              ( GLOBAL_EDF_ENABLE == 0U ) && ( PARTITIONED_EDF_ENABLE == 0U ) && \
+              ( configUSE_SRP_SHARED_STACKS == 0U ) )
+            // Base FreeRTOS fixed-priority regression test.
+            fixed_priority_test_1_run();
+            // Delayed-unblock fixed-priority regression test.
+            // fixed_priority_test_2_run();
         #endif
     #endif
 
