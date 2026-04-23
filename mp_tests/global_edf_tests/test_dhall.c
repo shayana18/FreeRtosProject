@@ -81,7 +81,7 @@ static void vMPDemoDhallTask( void * pvParameters )
     }
 }
 
-void mp_demo_test_2_dhall_run( void )
+void mp_test_dhall_run( void )
 {
     static const MPDemoDhallTaskConfig_t xHeavyCfg =
     {

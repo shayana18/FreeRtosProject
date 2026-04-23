@@ -73,7 +73,7 @@ static void vMPDemoPart1Task( void * pvParameters )
     }
 }
 
-void mp_demo_test_1_part_run( void )
+void mp_compare_part_run( void )
 {
     static const MPDemoPartTaskConfig_t xTaskCfgs[] =
     {

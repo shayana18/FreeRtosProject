@@ -44,6 +44,26 @@ void vTraceSignalDeadlineMiss( void );
 void vTraceClearDeadlineMissSignal( void );
 void vTraceDeadlineMissTick( void );
 void vApplicationDeadlineMissHook( uint32_t ulTaskId );
+
+#if ( configUSE_MP == 1 ) && ( configNUMBER_OF_CORES > 1 )
+void vTraceRecordMPOverrunEvent( const char * pcPolicy,
+                                 const char * pcReason,
+                                 const char * pcTaskName,
+                                 uint32_t ulTaskCode,
+                                 uint32_t ulCoreID,
+                                 uint32_t ulNowTick,
+                                 uint32_t ulReleaseTick,
+                                 uint32_t ulDeadlineTick,
+                                 uint32_t ulExecTicks,
+                                 uint32_t ulWcetTicks,
+                                 uint32_t ulNextReleaseTick );
+void vTraceFlushMPOverrunEvents( void );
+#else
+static inline void vTraceFlushMPOverrunEvents( void )
+{
+}
+#endif
+
 struct tskTaskControlBlock;
 void vApplicationStackOverflowHook( struct tskTaskControlBlock * xTask, char * pcTaskName );
 

@@ -69,7 +69,7 @@ static void vMPDemoGlob1Task( void * pvParameters )
     }
 }
 
-void mp_demo_test_1_glob_run( void )
+void mp_compare_glob_run( void )
 {
     static const MPDemoGlobTaskConfig_t xTaskCfgs[] =
     {

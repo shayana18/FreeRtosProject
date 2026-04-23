@@ -1,5 +1,6 @@
 #include "FreeRTOS.h"
 #include "task_trace.h"
+#include "task.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -13,8 +14,59 @@
 #endif
 
 #define TRACE_DEADLINE_MISS_HOLD_TICKS    ( ( configTICK_RATE_HZ > 0u ) ? configTICK_RATE_HZ : 1u )
+#define TRACE_MP_OVERRUN_EVENT_CAPACITY   8u
 
 static volatile uint32_t ulDeadlineMissHoldTicks = 0u;
+
+#if ( configUSE_MP == 1 ) && ( configNUMBER_OF_CORES > 1 )
+typedef struct xTRACE_MP_OVERRUN_EVENT
+{
+    BaseType_t xValid;
+    const char * pcPolicy;
+    const char * pcReason;
+    char pcTaskName[ configMAX_TASK_NAME_LEN ];
+    uint32_t ulTaskCode;
+    uint32_t ulCoreID;
+    uint32_t ulNowTick;
+    uint32_t ulReleaseTick;
+    uint32_t ulDeadlineTick;
+    uint32_t ulExecTicks;
+    uint32_t ulWcetTicks;
+    uint32_t ulNextReleaseTick;
+} TraceMPOverrunEvent_t;
+
+static TraceMPOverrunEvent_t xMPOverrunEvents[ TRACE_MP_OVERRUN_EVENT_CAPACITY ];
+static volatile UBaseType_t uxMPOverrunWriteIndex = 0u;
+static volatile uint32_t ulMPOverrunDroppedEvents = 0u;
+
+static void prvTraceCopyTaskName( char * pcDestination,
+                                  const char * pcSource )
+{
+    UBaseType_t uxIndex;
+
+    if( pcDestination == NULL )
+    {
+        return;
+    }
+
+    if( pcSource == NULL )
+    {
+        pcSource = "<unnamed>";
+    }
+
+    for( uxIndex = 0u; uxIndex < ( UBaseType_t ) ( configMAX_TASK_NAME_LEN - 1u ); uxIndex++ )
+    {
+        pcDestination[ uxIndex ] = pcSource[ uxIndex ];
+
+        if( pcSource[ uxIndex ] == '\0' )
+        {
+            return;
+        }
+    }
+
+    pcDestination[ configMAX_TASK_NAME_LEN - 1u ] = '\0';
+}
+#endif
 
 void vTraceUsbSerialInit( uint32_t ulWaitForHostMs )
 {
@@ -210,3 +262,99 @@ void vTraceDeadlineMissTick( void )
         }
     }
 }
+
+#if ( configUSE_MP == 1 ) && ( configNUMBER_OF_CORES > 1 )
+void vTraceRecordMPOverrunEvent( const char * pcPolicy,
+                                 const char * pcReason,
+                                 const char * pcTaskName,
+                                 uint32_t ulTaskCode,
+                                 uint32_t ulCoreID,
+                                 uint32_t ulNowTick,
+                                 uint32_t ulReleaseTick,
+                                 uint32_t ulDeadlineTick,
+                                 uint32_t ulExecTicks,
+                                 uint32_t ulWcetTicks,
+                                 uint32_t ulNextReleaseTick )
+{
+    UBaseType_t uxSavedInterruptStatus;
+    UBaseType_t uxSlot;
+
+    uxSavedInterruptStatus = taskENTER_CRITICAL_FROM_ISR();
+    {
+        uxSlot = uxMPOverrunWriteIndex;
+        uxMPOverrunWriteIndex = ( UBaseType_t ) ( ( uxMPOverrunWriteIndex + 1u ) %
+                                                 TRACE_MP_OVERRUN_EVENT_CAPACITY );
+
+        if( xMPOverrunEvents[ uxSlot ].xValid != pdFALSE )
+        {
+            ulMPOverrunDroppedEvents++;
+        }
+
+        xMPOverrunEvents[ uxSlot ].pcPolicy = ( pcPolicy != NULL ) ? pcPolicy : "unknown";
+        xMPOverrunEvents[ uxSlot ].pcReason = ( pcReason != NULL ) ? pcReason : "unknown";
+        prvTraceCopyTaskName( xMPOverrunEvents[ uxSlot ].pcTaskName, pcTaskName );
+        xMPOverrunEvents[ uxSlot ].ulTaskCode = ulTaskCode;
+        xMPOverrunEvents[ uxSlot ].ulCoreID = ulCoreID;
+        xMPOverrunEvents[ uxSlot ].ulNowTick = ulNowTick;
+        xMPOverrunEvents[ uxSlot ].ulReleaseTick = ulReleaseTick;
+        xMPOverrunEvents[ uxSlot ].ulDeadlineTick = ulDeadlineTick;
+        xMPOverrunEvents[ uxSlot ].ulExecTicks = ulExecTicks;
+        xMPOverrunEvents[ uxSlot ].ulWcetTicks = ulWcetTicks;
+        xMPOverrunEvents[ uxSlot ].ulNextReleaseTick = ulNextReleaseTick;
+        xMPOverrunEvents[ uxSlot ].xValid = pdTRUE;
+    }
+    taskEXIT_CRITICAL_FROM_ISR( uxSavedInterruptStatus );
+}
+
+void vTraceFlushMPOverrunEvents( void )
+{
+    UBaseType_t uxIndex;
+    uint32_t ulDroppedEvents;
+
+    taskENTER_CRITICAL();
+    {
+        ulDroppedEvents = ulMPOverrunDroppedEvents;
+        ulMPOverrunDroppedEvents = 0u;
+    }
+    taskEXIT_CRITICAL();
+
+    if( ulDroppedEvents != 0u )
+    {
+        vTraceUsbPrint( "[MP EDF] dropped %lu deferred overrun/deadline trace events\r\n",
+                        ( unsigned long ) ulDroppedEvents );
+    }
+
+    for( uxIndex = 0u; uxIndex < TRACE_MP_OVERRUN_EVENT_CAPACITY; uxIndex++ )
+    {
+        TraceMPOverrunEvent_t xEvent;
+        BaseType_t xHasEvent = pdFALSE;
+
+        taskENTER_CRITICAL();
+        {
+            if( xMPOverrunEvents[ uxIndex ].xValid != pdFALSE )
+            {
+                xEvent = xMPOverrunEvents[ uxIndex ];
+                xMPOverrunEvents[ uxIndex ].xValid = pdFALSE;
+                xHasEvent = pdTRUE;
+            }
+        }
+        taskEXIT_CRITICAL();
+
+        if( xHasEvent != pdFALSE )
+        {
+            vTraceUsbPrint( "[MP %s EDF] %s: task=%s tag=%lu core=%lu now=%lu release=%lu deadline=%lu exec=%lu wcet=%lu next_release=%lu\r\n",
+                            xEvent.pcPolicy,
+                            xEvent.pcReason,
+                            xEvent.pcTaskName,
+                            ( unsigned long ) xEvent.ulTaskCode,
+                            ( unsigned long ) xEvent.ulCoreID,
+                            ( unsigned long ) xEvent.ulNowTick,
+                            ( unsigned long ) xEvent.ulReleaseTick,
+                            ( unsigned long ) xEvent.ulDeadlineTick,
+                            ( unsigned long ) xEvent.ulExecTicks,
+                            ( unsigned long ) xEvent.ulWcetTicks,
+                            ( unsigned long ) xEvent.ulNextReleaseTick );
+        }
+    }
+}
+#endif
