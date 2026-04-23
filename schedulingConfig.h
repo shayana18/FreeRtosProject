@@ -6,12 +6,12 @@
  * configUSE_UP and configUSE_MP select the EDF execution model only when
  * configUSE_EDF == 1U.
  */
-#define configUSE_UP  1U
-#define configUSE_MP  0U
+#define configUSE_UP  0U
+#define configUSE_MP  1U
 // EDF selection. If 0U, use the stock FreeRTOS fixed-priority scheduler.
 #define configUSE_EDF 1U
 // Uniprocessor scheduling config
-#define configUSE_SRP 1
+#define configUSE_SRP 0
 #define configUSE_CBS 0
 // MP scheduling config
 #define GLOBAL_EDF_ENABLE 0U

@@ -1,4 +1,4 @@
-#include "mp_tests/demo_tests/test_1_part.h"
+#include "mp_tests/test_compare_part.h"
 
 #if ( ( configUSE_MP == 1 ) && ( configUSE_UP == 0 ) && ( configUSE_EDF == 1 ) && ( PARTITIONED_EDF_ENABLE == 1U ) )
 

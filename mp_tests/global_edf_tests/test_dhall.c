@@ -1,4 +1,4 @@
-#include "mp_tests/demo_tests/test_2_dhall.h"
+#include "mp_tests/global_edf_tests/test_dhall.h"
 
 #if ( ( configUSE_MP == 1 ) && ( configUSE_UP == 0 ) && ( configUSE_EDF == 1 ) && ( GLOBAL_EDF_ENABLE == 1U ) )
 

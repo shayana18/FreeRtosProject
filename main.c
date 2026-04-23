@@ -35,9 +35,9 @@
     #elif ( ( configUSE_MP == 1 ) && ( configUSE_UP == 0 ) )
         #include "mp_tests/test_1.h"
         #include "mp_tests/test_2.h"
-        #include "mp_tests/demo_tests/test_1_glob.h"
-        #include "mp_tests/demo_tests/test_1_part.h"
-        #include "mp_tests/demo_tests/test_2_dhall.h"
+        #include "mp_tests/test_compare_glob.h"
+        #include "mp_tests/test_compare_part.h"
+        #include "mp_tests/global_edf_tests/test_dhall.h"
 
         #if ( PARTITIONED_EDF_ENABLE == 0U )
             #include "mp_tests/global_edf_tests/test_1.h"
@@ -176,7 +176,6 @@ int main( void )
             // while unrestricted tasks migrate freely. Hyperperiod 12 s.
             // mp_global_edf_5_run();
 
-            // DEMO TESTING
             mp_compare_glob_run();
             // mp_test_dhall_run();
 
@@ -190,7 +189,6 @@ int main( void )
             // Partitioned EDF MP WCET-overrun UART trace test.
             // mp_partitioned_edf_3_run();
 
-            // DEMO TEST
             // mp_compare_part_run();
             #endif
 
