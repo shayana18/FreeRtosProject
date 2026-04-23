@@ -8121,6 +8121,14 @@ BaseType_t xTaskIncrementTick( void )
                             traceTASK_DEADLINE_MISSED();
                             xStopCurrentJob = pdTRUE;
                         }
+                        else if( ( pxCurrentTCB->xJobExecTicks >= pxCurrentTCB->xWcetTicks )
+                        #if ( ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
+                            && ( prvTaskIsCBSManaged( pxCurrentTCB ) == pdFALSE )
+                        #endif
+                            )
+                        {
+                            xStopCurrentJob = pdTRUE;
+                        }
 
                         if( xStopCurrentJob != pdFALSE )
                         {
@@ -8172,33 +8180,58 @@ BaseType_t xTaskIncrementTick( void )
 
                         pxRunningTCB->xJobExecTicks++;
 
-                        if( ( prvTickTimeIsAfter( xConstTickCount, pxRunningTCB->xAbsDeadline ) != pdFALSE ) ||
-                            ( pxRunningTCB->xJobExecTicks >= pxRunningTCB->xWcetTicks ) )
                         {
-                            const TickType_t xNextReleaseTime = prvPeriodicTaskNextReleaseAfter( pxRunningTCB,
-                                                                                                  xConstTickCount );
+                            const BaseType_t xDeadlineMissed = prvTickTimeIsAfter( xConstTickCount,
+                                                                                   pxRunningTCB->xAbsDeadline );
+                            const BaseType_t xWcetOverrun = ( pxRunningTCB->xJobExecTicks >= pxRunningTCB->xWcetTicks ) ? pdTRUE : pdFALSE;
 
-                            if( prvTickTimeIsAfter( xConstTickCount, pxRunningTCB->xAbsDeadline ) != pdFALSE )
+                            if( ( xDeadlineMissed != pdFALSE ) ||
+                                ( xWcetOverrun != pdFALSE ) )
                             {
-                                traceTASK_DEADLINE_MISSED();
-                            }
+                                const TickType_t xNextReleaseTime = prvPeriodicTaskNextReleaseAfter( pxRunningTCB,
+                                                                                                      xConstTickCount );
 
-                            prvPeriodicTaskAdvanceAndReinsert( pxRunningTCB,
-                                                               &( pxRunningTCB->xEDFTaskListItem ),
-                                                               pxEDFRegistryList,
-                                                               xNextReleaseTime );
+                                #if ( PARTITIONED_EDF_ENABLE == 1U )
+                                    const char * const pcMPPolicy = "partitioned";
+                                #else
+                                    const char * const pcMPPolicy = "global";
+                                #endif
+                                const char * const pcMPReason = ( xDeadlineMissed != pdFALSE ) ? "deadline miss" : "WCET overrun";
 
-                            prvAddTaskToDelayedListForTask( pxRunningTCB,
-                                                            xNextReleaseTime - xConstTickCount,
-                                                            pdFALSE );
+                                vTraceRecordMPOverrunEvent( pcMPPolicy,
+                                                            pcMPReason,
+                                                            pxRunningTCB->pcTaskName,
+                                                            ( uint32_t ) ( uintptr_t ) pxRunningTCB->pxTaskTag,
+                                                            ( uint32_t ) xEDFCoreID,
+                                                            ( uint32_t ) xConstTickCount,
+                                                            ( uint32_t ) pxRunningTCB->xAbsJobReleaseTime,
+                                                            ( uint32_t ) pxRunningTCB->xAbsDeadline,
+                                                            ( uint32_t ) pxRunningTCB->xJobExecTicks,
+                                                            ( uint32_t ) pxRunningTCB->xWcetTicks,
+                                                            ( uint32_t ) xNextReleaseTime );
 
-                            if( xEDFCoreID == ( BaseType_t ) portGET_CORE_ID() )
-                            {
-                                xSwitchRequired = pdTRUE;
-                            }
-                            else
-                            {
-                                prvYieldCore( xEDFCoreID );
+                                if( xDeadlineMissed != pdFALSE )
+                                {
+                                    traceTASK_DEADLINE_MISSED();
+                                }
+
+                                prvPeriodicTaskAdvanceAndReinsert( pxRunningTCB,
+                                                                   &( pxRunningTCB->xEDFTaskListItem ),
+                                                                   pxEDFRegistryList,
+                                                                   xNextReleaseTime );
+
+                                prvAddTaskToDelayedListForTask( pxRunningTCB,
+                                                                xNextReleaseTime - xConstTickCount,
+                                                                pdFALSE );
+
+                                if( xEDFCoreID == ( BaseType_t ) portGET_CORE_ID() )
+                                {
+                                    xSwitchRequired = pdTRUE;
+                                }
+                                else
+                                {
+                                    prvYieldCore( xEDFCoreID );
+                                }
                             }
                         }
                     }

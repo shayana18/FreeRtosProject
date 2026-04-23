@@ -8,6 +8,8 @@ This project extends FreeRTOS with EDF, SRP, CBS, and multiprocessor EDF schedul
 
 The kernel implementation follows the same configuration-driven approach internally. EDF, SRP, CBS, and multiprocessor-specific metadata, ready lists, admission tests, and dispatch paths are wrapped in preprocessor guards such as `configUSE_EDF`, `configUSE_UP`, `configUSE_MP`, `configUSE_SRP`, `configUSE_CBS`, `GLOBAL_EDF_ENABLE`, and `PARTITIONED_EDF_ENABLE`. This keeps the selected scheduling mode explicit and prevents inactive features from being compiled into the final image. That is important for FreeRTOS because the kernel is expected to remain lightweight and predictable on embedded targets. A build that only uses base FreeRTOS does not carry EDF/SRP/CBS/MP scheduling code, while a build that enables one of the real-time scheduling modes includes only the code required for that selected mode.
 
+Note that while this approach may make the code look more "intimidating" the API and binary size benefits make it worth while when caring and end user centeric approach to the developement of this problem
+
 ## Configuration safety
 
 The project also uses compile-time checks in `schedulingConfig.h` to reject invalid scheduler combinations early. The main checks are:
