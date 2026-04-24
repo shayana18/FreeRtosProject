@@ -13,25 +13,27 @@
 #include "test_utils.h"
 
 /*
- * Global EDF WCET-overrun trace test.
+ * Global EDF WCET-overrun + deadline-miss trace test.
  *
- * The overrun task intentionally runs past WCET. The MP tick path records the
- * event from ISR context and these tasks flush the deferred UART messages from
- * task context. The message should identify MP global EDF, the task, core,
- * release, deadline, execution count, WCET, and next release.
+ * The miss task exceeds WCET first and then also misses a constrained relative
+ * deadline. Deferred WCET/deadline print callbacks are flushed from task
+ * context so both events can be observed in a global EDF MP run.
  */
 
 #define GLOB4_STACK_DEPTH        256u
 
 #define GLOB4_OVR_PERIOD_MS     5000u
+#define GLOB4_OVR_DEADLINE_MS   1800u
 #define GLOB4_OVR_WCET_MS       1000u
-#define GLOB4_OVR_WORK_MS       1300u
+#define GLOB4_OVR_WORK_MS       2200u
 
 #define GLOB4_N1_PERIOD_MS      8000u
+#define GLOB4_N1_DEADLINE_MS    8000u
 #define GLOB4_N1_WCET_MS        1000u
 #define GLOB4_N1_WORK_MS         800u
 
 #define GLOB4_N2_PERIOD_MS     10000u
+#define GLOB4_N2_DEADLINE_MS   10000u
 #define GLOB4_N2_WCET_MS        1000u
 #define GLOB4_N2_WORK_MS         800u
 
@@ -40,6 +42,7 @@ typedef struct MPGlobOverrunTaskConfig
     const char * pcName;
     uint32_t ulTag;
     uint32_t ulPeriodMs;
+    uint32_t ulDeadlineMs;
     uint32_t ulWcetMs;
     uint32_t ulWorkMs;
 } MPGlobOverrunTaskConfig_t;
@@ -56,6 +59,8 @@ static void vMPGlobOverrunTask( void * pvParameters )
     for( ;; )
     {
         spin_ms( pxCfg->ulWorkMs );
+        vTraceFlushWcetOverrunEvents();
+        vTraceFlushDeadlineMissEvents();
         vTraceFlushMPOverrunEvents();
 
         if( xTaskDelayUntil( &xLastWakeTime, pdMS_TO_TICKS( pxCfg->ulPeriodMs ) ) == pdFALSE )
@@ -63,6 +68,8 @@ static void vMPGlobOverrunTask( void * pvParameters )
             xLastWakeTime = xTaskGetTickCount();
         }
 
+        vTraceFlushWcetOverrunEvents();
+        vTraceFlushDeadlineMissEvents();
         vTraceFlushMPOverrunEvents();
     }
 }
@@ -71,9 +78,9 @@ void mp_global_edf_4_run( void )
 {
     static const MPGlobOverrunTaskConfig_t xTaskCfgs[] =
     {
-        { "G4 OVR", 1u, GLOB4_OVR_PERIOD_MS, GLOB4_OVR_WCET_MS, GLOB4_OVR_WORK_MS },
-        { "G4 N1",  2u, GLOB4_N1_PERIOD_MS,  GLOB4_N1_WCET_MS,  GLOB4_N1_WORK_MS },
-        { "G4 N2",  4u, GLOB4_N2_PERIOD_MS,  GLOB4_N2_WCET_MS,  GLOB4_N2_WORK_MS }
+        { "G4 OVR", 1u, GLOB4_OVR_PERIOD_MS, GLOB4_OVR_DEADLINE_MS, GLOB4_OVR_WCET_MS, GLOB4_OVR_WORK_MS },
+        { "G4 N1",  2u, GLOB4_N1_PERIOD_MS,  GLOB4_N1_DEADLINE_MS,  GLOB4_N1_WCET_MS,  GLOB4_N1_WORK_MS },
+        { "G4 N2",  4u, GLOB4_N2_PERIOD_MS,  GLOB4_N2_DEADLINE_MS,  GLOB4_N2_WCET_MS,  GLOB4_N2_WORK_MS }
     };
     UBaseType_t uxIndex;
 
@@ -93,7 +100,7 @@ void mp_global_edf_4_run( void )
                                    &xHandle,
                                    xTaskCfgs[ uxIndex ].ulPeriodMs,
                                    xTaskCfgs[ uxIndex ].ulWcetMs,
-                                   xTaskCfgs[ uxIndex ].ulPeriodMs,
+                                   xTaskCfgs[ uxIndex ].ulDeadlineMs,
                                    tskNO_AFFINITY ) == pdPASS );
         configASSERT( xHandle != NULL );
 

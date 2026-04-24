@@ -1791,6 +1791,7 @@ BaseType_t xQueueGenericReset( QueueHandle_t xQueue,
                                        UBaseType_t uxResourceType ) PRIVILEGED_FUNCTION;
     BaseType_t xQueueSemaphoreGiveSRP( QueueHandle_t xQueue,
                                        UBaseType_t uxResourceType ) PRIVILEGED_FUNCTION;
+    BaseType_t xQueueSemaphoreForceGiveSRP( QueueHandle_t xQueue ) PRIVILEGED_FUNCTION;
 #endif
 
 #if ( configUSE_TRACE_FACILITY == 1 )

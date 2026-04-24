@@ -110,7 +110,7 @@ int main( void )
             // Simple cbs test with one periodic EDF task and one CBS-managed aperiodic task.
             // cbs_1_run();
             // Multiple CBS server test with two periodic tasks plus two CBS-managed aperiodic tasks.
-            cbs_2_run();
+            // cbs_2_run();
             // Single-server CBS deadline-transition test:
         // sparse arrival forces deadline = arrival + T (non-multiple), then frequent jobs drain
         // budget and force deadline = current_deadline + T on exhaustion.
@@ -118,18 +118,18 @@ int main( void )
         // One CBS server with four aperiodic job-source tasks; asserts CBS wins
         // tie-break against periodic task on equal deadlines.
         // cbs_4_run();
-        // CBS admission rejection plus one-outstanding-job rejection test.
-        // cbs_5_run();
+        // Periodic EDF overrun/deadline-miss test with a CBS server active in the background.
+        cbs_5_run();
         #elif ( configUSE_SRP == 1 )
             // srp_1_run();
             // SRP shared-resource ordering test.
-            srp_2_run();
+            // srp_2_run();
             // SRP admission control with blocking terms.
             // srp_3_run();
             // SRP shared-stack quantitative accounting study.
             // srp_4_run();
-            // SRP WCET overrun while holding a resource.
-            // srp_5_run();
+            // SRP deadline miss while holding a resource.
+            srp_5_run();
             #elif ( configUSE_SRP == 0 && configUSE_CBS == 0  && GLOBAL_EDF_ENABLE == 0U && PARTITIONED_EDF_ENABLE == 0U )
             // Simple edf implicit deadlinetest case with 3 tasks added at startup with a fairly low utilization.
             // edf_1_run();
@@ -153,10 +153,10 @@ int main( void )
             // edf_7_run();
 
             // Seven tasks with binary-encoded trace IDs and two intentional single deadline-miss events.
-            // edf_8_run();
+            edf_8_run();
 
             // Stress test with 100 tasks to see if edf is able to perform to spec.
-            edf_9_run();
+            // edf_9_run();
             #endif
         #elif ( ( configUSE_MP == 1 ) && ( configUSE_UP == 0 ) )
             #if ( GLOBAL_EDF_ENABLE == 1U )
@@ -169,15 +169,15 @@ int main( void )
             // Global EDF migration: one unrestricted task should appear on both cores across different jobs.
             // mp_global_edf_3_run();
 
-            // Global EDF MP WCET-overrun UART trace test.
+            // Global EDF MP Deadline-overrun plus deadline-miss UART trace test.
             // mp_global_edf_4_run();
 
             // Global EDF affinity enforcement: pinned tasks must stay on their assigned core
             // while unrestricted tasks migrate freely. Hyperperiod 12 s.
             // mp_global_edf_5_run();
 
-            mp_compare_glob_run();
-            // mp_test_dhall_run();
+            // mp_compare_glob_run();
+            mp_test_dhall_run();
 
             #else
             // Partitioned EDF basic: tasks should only appear on their assigned core bank.
@@ -186,8 +186,8 @@ int main( void )
             // Partitioned EDF explicit migration: a task should move to the new core after affinity change.
             // mp_partitioned_edf_2_run();
 
-            // Partitioned EDF MP WCET-overrun UART trace test.
-            // mp_partitioned_edf_3_run();
+            // Partitioned EDF MP Deadline-overrun plus deadline-miss UART trace test.
+            mp_partitioned_edf_3_run();
 
             // mp_compare_part_run();
             #endif
@@ -204,9 +204,9 @@ int main( void )
               ( GLOBAL_EDF_ENABLE == 0U ) && ( PARTITIONED_EDF_ENABLE == 0U ) && \
               ( configUSE_SRP_SHARED_STACKS == 0U ) )
             // Base FreeRTOS fixed-priority regression test.
-            fixed_priority_test_1_run();
+            // fixed_priority_test_1_run();
             // Delayed-unblock fixed-priority regression test.
-            // fixed_priority_test_2_run();
+            fixed_priority_test_2_run();
         #endif
     #endif
 
@@ -239,8 +239,9 @@ void vApplicationStackOverflowHook( TaskHandle_t xTask,
 
 void vApplicationDeadlineMissHook( uint32_t ulTaskId )
 {
+    ( void ) ulTaskId;
+
     xDeadlineMissDebugContext.ulMissCount++;
-    vTraceUsbPrint( "Deadline miss: task id=%lu\r\n", ( unsigned long ) ulTaskId );
 
     if( xDeadlineMissDebugContext.ulFirstCaptured == 0u )
     {

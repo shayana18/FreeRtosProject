@@ -3199,6 +3199,7 @@ typedef struct xSTATIC_TCB
         TickType_t xPeriodTicks;             /**< Task period in ticks. */
         TickType_t xWcetTicks;               /**< WCET budget in ticks. */
         TickType_t xJobExecTicks;            /**< Number of ticks spent on current job. */
+        BaseType_t xWcetOverrunReported;     /**< Mirrors TCB_t::xWcetOverrunReported for static allocation size compatibility. */
         TickType_t xRelDeadline;             /**< Relative deadline in ticks. */
         TickType_t xAbsDeadline;             /**< Absolute deadline in ticks. */
         StaticListItem_t xEDFTaskListItem;   /**< Mirrors TCB_t::xEDFTaskListItem for static allocation size compatibility. */

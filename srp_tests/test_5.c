@@ -14,11 +14,12 @@
 #include "test_utils.h"
 
 /*
- * SRP WCET-overrun test inside a critical section.
+ * SRP deadline-miss cleanup test inside a critical section.
  *
- * The overrun task holds R1 and intentionally executes longer than its WCET.
- * The kernel should stop that job and force-release the resource so another
- * task can acquire R1 instead of being blocked for the rest of the period.
+ * The overrun task holds R1, runs past its WCET, and then also misses its
+ * deadline. The kernel should force-release the resource on the deadline miss
+ * so another task can acquire R1 instead of being blocked for the rest of the
+ * period.
  */
 
 #define SRP5_STACK_DEPTH                 512u
@@ -31,7 +32,7 @@
 #define SRP5_OBSERVER_WORK_MS           500u
 
 #define SRP5_OVERRUN_PERIOD_MS        8000u
-#define SRP5_OVERRUN_DEADLINE_MS      8000u
+#define SRP5_OVERRUN_DEADLINE_MS      1500u
 #define SRP5_OVERRUN_WCET_MS          1000u
 #define SRP5_OVERRUN_R1_CLAIM_MS      1800u
 #define SRP5_OVERRUN_WORK_MS          1800u
@@ -66,12 +67,15 @@ static void vSRP5ObserverTask( void * pvParameters )
     {
         configASSERT( xSemaphoreTakeSRP( xSRP5R1Semaphore, 0u, SRP5_RESOURCE_R1 ) == pdPASS );
         ulSRP5ObserverAcquires++;
-        vTraceUsbPrint( "[SRP5] observer acquired R1 after overrun cleanup, count=%lu\r\n",
+        vTraceFlushWcetOverrunEvents();
+        vTraceFlushDeadlineMissEvents();
+        vTraceUsbPrint( "[SRP5] observer acquired R1 after deadline-miss cleanup, count=%lu\r\n",
                         ( unsigned long ) ulSRP5ObserverAcquires );
         spin_ms( SRP5_OBSERVER_WORK_MS );
         configASSERT( xSemaphoreGiveSRP( xSRP5R1Semaphore, SRP5_RESOURCE_R1 ) == pdPASS );
 
         vSRPReportStackUsageIfDue();
+        vTraceFlushDeadlineMissEvents();
 
         if( xTaskDelayUntil( &xLastWakeTime, pdMS_TO_TICKS( SRP5_OBSERVER_PERIOD_MS ) ) == pdFALSE )
         {
@@ -93,17 +97,20 @@ static void vSRP5OverrunTask( void * pvParameters )
         configASSERT( xSemaphoreTakeSRP( xSRP5R1Semaphore, 0u, SRP5_RESOURCE_R1 ) == pdPASS );
         vTraceUsbPrint( "[SRP5] overrun task entered R1 critical section\r\n" );
         spin_ms( SRP5_OVERRUN_WORK_MS );
+        vTraceFlushWcetOverrunEvents();
+        vTraceFlushDeadlineMissEvents();
 
         xGiveResult = xSemaphoreGiveSRP( xSRP5R1Semaphore, SRP5_RESOURCE_R1 );
 
         if( xGiveResult == pdFAIL )
         {
             ulSRP5ForcedReleaseObserved++;
-            vTraceUsbPrint( "[SRP5] forced release observed after WCET overrun, count=%lu\r\n",
+            vTraceUsbPrint( "[SRP5] forced release observed after deadline miss, count=%lu\r\n",
                             ( unsigned long ) ulSRP5ForcedReleaseObserved );
         }
 
         vSRPReportStackUsageIfDue();
+        vTraceFlushDeadlineMissEvents();
 
         if( xTaskDelayUntil( &xLastWakeTime, pdMS_TO_TICKS( SRP5_OVERRUN_PERIOD_MS ) ) == pdFALSE )
         {

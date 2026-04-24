@@ -22,7 +22,7 @@ Both MP policies reuse the EDF metadata already added to the task control block:
 - absolute deadline
 - EDF registry list item
 
-The MP scheduler does not introduce a separate timing subsystem. The normal FreeRTOS tick path still drives job accounting through `xTaskIncrementTick()`. On every tick, the MP EDF path scans the currently running task on each core, increments its execution count, and checks whether the job has either missed its deadline or exhausted its WCET. If either happens, the job is advanced to its next release, its execution count is reset, the task is delayed until the next period, and the affected core is forced to reschedule.
+The MP scheduler does not introduce a separate timing subsystem. The normal FreeRTOS tick path still drives job accounting through `xTaskIncrementTick()`. On every tick, the MP EDF path scans the currently running task on each core, increments its execution count, and checks whether the job has either reached its WCET boundary while still executing or actually missed its deadline. A WCET overrun only triggers the overrun hook. A real deadline miss advances the job to its next release, resets its execution count, delays the task until the next period, and forces the affected core to reschedule.
 
 ## Ready queues and registry lists
 

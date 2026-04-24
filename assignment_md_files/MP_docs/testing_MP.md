@@ -5,380 +5,287 @@
 - Shared deadline-miss indicator: GPIO `15`.
 
 # MP Software Testing Setup
-- MP tests are in the `mp_tests` tree (`global_edf_tests`, `partitioned_edf_tests`, and shared MP tests).
-- Test entry points are exposed as `mp_*_run()` and selected in `main.c`.
+- MP tests are in the `mp_tests` tree.
+- The captured hardware assets for this document live under `assignment_md_files/test_assets/MP Tests/`.
 - Build mode must match policy under test:
   - Global EDF: `GLOBAL_EDF_ENABLE=1`, `PARTITIONED_EDF_ENABLE=0`
   - Partitioned EDF: `GLOBAL_EDF_ENABLE=0`, `PARTITIONED_EDF_ENABLE=1`
-- Admission/runtime-create tests additionally record `volatile` result flags for `xTaskCreate()` outcomes.
-
-# MP Test Organization
-- The MP test numbering in this document spans three buckets: policy-specific global EDF tests, policy-specific partitioned EDF tests, and shared MP tests that can run under either active MP mode.
-- Because of that split, the numbered test in this document is not always the same as the numeric suffix of the source file. For example, the shared admission and runtime-create tests live in `mp_tests/test_1.c` and `mp_tests/test_2.c`, while policy-specific tests live in `mp_tests/global_edf_tests/` or `mp_tests/partitioned_edf_tests/`.
-- For that reason, each test case below includes an explicit file path and entry point.
-
-# Additional MP Test Files
-- The MP source tree also contains policy-specific overrun/UART-focused tests that are useful during debugging even though they are not part of the main indexed GPIO comparison set in this document.
-- In particular, `mp_tests/global_edf_tests/test_4.c` exposes `mp_global_edf_4_run()` and `mp_tests/partitioned_edf_tests/test_3.c` exposes `mp_partitioned_edf_3_run()`.
-- Those tests are still referenced in `main.c`, so keeping them noted here makes the MP test tree easier to navigate even though the main results table emphasizes the more presentation-ready dispatch, migration, affinity, admission, and demo scenarios.
+- Admission tests additionally record `volatile` result flags for `xTaskCreate()` outcomes.
+- For CBS-style aperiodic activity elsewhere in the project, the server/worker task has the task ID in traces; individual submitted jobs do not. MP tests in this document are ordinary MP EDF tests, not per-job CBS traces.
 
 # MP Test Methods
+- Task IDs are observed on the GPIO task-code pins and decoded using the task-switch strobe as a sampling clock. On the waveform, the strobe edge marks when the binary task-code output should be read.
+- In the normal binary-trace setup, up to 7 GPIO bits can be used for task ID output. When a given test has fewer tasks and deadline-miss observation is important, the highest binary-output pin may instead be repurposed as a direct deadline-miss probe.
+- When a test has very few tasks, one-hot encoding may be used instead of binary encoding to make the waveform easier to read directly.
+- For precise timing analysis, the captured discussion in this document focuses on smaller windows that are sufficient to prove the intended scheduling or synchronization feature. We intentionally do not require full-hyperperiod inspection for every test when a shorter interval already demonstrates correctness.
 - Use GPIO waveforms as primary evidence for dispatch, preemption, migration, and core ownership.
-- For admission/runtime-create tests, pair waveform analysis with `volatile` accept/reject result variables.
+- Use UART output captures where included for overrun/deadline-miss tests.
+- For admission tests, pair waveform analysis with the saved result-flag captures.
 - Validate each policy in its correct build mode before hardware-run interpretation.
-- For small sets, compare first releases manually; for stress/bound tests, prioritize acceptance/rejection plus stability signals.
-
-# MP Test Index
-| Test # | Summary Name | File / Entry Point | Policy Mode | Type | Key Goal |
-|---|---|---|---|---|---|
-| 1 | Global EDF Basic Dispatch | `mp_tests/global_edf_tests/test_1.c`, `mp_global_edf_1_run()` | Global | Scheduling | Two earliest deadlines occupy two cores |
-| 2 | Global EDF Preemption | `mp_tests/global_edf_tests/test_2.c`, `mp_global_edf_2_run()` | Global | Scheduling | Cross-core preemption/yield correctness |
-| 3 | Global EDF Migration | `mp_tests/global_edf_tests/test_3.c`, `mp_global_edf_3_run()` | Global | Scheduling | Unrestricted task appears on different cores |
-| 4 | Global EDF Affinity Enforcement | `mp_tests/global_edf_tests/test_5.c`, `mp_global_edf_5_run()` | Global | Scheduling/affinity | Pinned tasks stay on assigned cores |
-| 5 | Partitioned EDF Basic Dispatch | `mp_tests/partitioned_edf_tests/test_1.c`, `mp_partitioned_edf_1_run()` | Partitioned | Scheduling/ownership | Tasks execute only on assigned partitions |
-| 6 | Partitioned EDF Explicit Migration | `mp_tests/partitioned_edf_tests/test_2.c`, `mp_partitioned_edf_2_run()` | Partitioned | Migration | Task shifts to new partition after affinity change |
-| 7 | MP Admission Control | `mp_tests/test_1.c`, `mp_edf_admission_1_run()` | Global/Partitioned | Admission | Reject unschedulable, accept schedulable tasks |
-| 8 | MP Runtime Task Creation | `mp_tests/test_2.c`, `mp_edf_runtime_create_1_run()` | Global/Partitioned | Runtime create | Admit/reject tasks while scheduler is running |
-| 9 | Global EDF Demo Compare | `mp_tests/test_compare_glob.c`, `mp_compare_glob_run()` | Global | Demo | Visual global EDF behavior comparison |
-| 10 | Partitioned EDF Best-Fit Demo | `mp_tests/test_compare_part.c`, `mp_compare_part_run()` | Partitioned | Demo | Verify best-fit partition placement behavior |
-| 11 | Conservative Global Admission (Dhall) | `mp_tests/global_edf_tests/test_dhall.c`, `mp_test_dhall_run()` | Global | Admission bound demo | Validate sufficient-bound rejection behavior |
 
 # MP Test Cases + Results
 
-## Test 1 - Global EDF Basic Dispatch
-### Task Table
-| Task/Class | Timing Definition | Affinity | First Release (ms) |
-|---|---|---|---:|
-| Startup periodic set (see `mp_tests/global_edf_tests/test_1.c`) | defined in source | Unrestricted/global | 0 |
+## Global EDF Tests
 
-### Description of Test
-Baseline global EDF test to confirm simultaneous dispatch on two cores picks the two best (earliest deadline) runnable jobs.
-
-### Test Implementation
+### Test 1 - Basic Dispatch
+#### Test Implementation
 - File: `mp_tests/global_edf_tests/test_1.c`
 - Entry point: `mp_global_edf_1_run()`
 
-### Expected Results and Results
-Expected waveform placeholder:
-![MP Test 1 Expected](images/mp_test_1_expected.png)
-
-Measured waveform placeholder:
-![MP Test 1 Results](images/mp_test_1_results.png)
+#### Trace Task IDs
+- `G1 -> 1`
+- `G2 -> 2`
+- `G3 -> 4`
 
 #### Expected
-- At startup, two earliest-deadline jobs should appear concurrently across core 0 and core 1 GPIO banks.
-- Worse-deadline ready jobs should remain pending until one core frees.
+- At startup, the two earliest-deadline runnable jobs should occupy the two cores.
+- Worse-deadline jobs should wait until one core becomes free.
 
-#### Actual
--
+#### Measured Waveform
+![Test 1 MP Global Waveform](<../test_assets/MP Tests/Global EDF Tests/Test 1/Test 1 MP Global Waveform.png>)
 
-#### Verified
-- Global EDF dual-core selection behavior is correct for simultaneous ready jobs.
-
-## Test 2 - Global EDF Preemption
-### Task Table
-| Task/Class | Timing Definition | Affinity | Trigger |
-|---|---|---|---|
-| Preemption scenario set (see `mp_tests/global_edf_tests/test_2.c`) | defined in source | Unrestricted/global | arrival of earlier-deadline job |
-
-### Description of Test
-Checks that when a better-deadline job arrives, kernel yields the appropriate running core and replaces a worse active job.
-
-### Test Implementation
+### Test 2 - Preemption
+#### Test Implementation
 - File: `mp_tests/global_edf_tests/test_2.c`
 - Entry point: `mp_global_edf_2_run()`
 
-### Expected Results and Results
-Expected waveform placeholder:
-![MP Test 2 Expected](images/mp_test_2_expected.png)
-
-Measured waveform placeholder:
-![MP Test 2 Results](images/mp_test_2_results.png)
+#### Trace Task IDs
+- `G1 -> 1`
+- `G2 -> 2`
+- `G3 -> 4`
 
 #### Expected
-- During steady execution, an arriving earlier-deadline job should trigger a core switch.
-- Preempted job should disappear from one bank and reappear later when eligible.
+- An arriving earlier-deadline job should preempt a worse currently running job.
+- The displaced task should resume later when it becomes eligible again.
 
-#### Actual
--
+#### Measured Waveform
+![Test 2 MP Global Waveform](<../test_assets/MP Tests/Global EDF Tests/Test 2/Test 2 MP Global Waveform.png>)
 
-#### Verified
-- Cross-core preemption logic and yield signaling are functioning under global EDF.
-
-## Test 3 - Global EDF Migration
-### Task Table
-| Task/Class | Timing Definition | Affinity | Observation Window |
-|---|---|---|---|
-| Migration scenario set (see `mp_tests/global_edf_tests/test_3.c`) | defined in source | Unrestricted/global | multiple releases |
-
-### Description of Test
-Validates that globally runnable tasks are not permanently tied to one core and can migrate across jobs.
-
-### Test Implementation
+### Test 3 - Migration
+#### Test Implementation
 - File: `mp_tests/global_edf_tests/test_3.c`
 - Entry point: `mp_global_edf_3_run()`
 
-### Expected Results and Results
-Expected waveform placeholder:
-![MP Test 3 Expected](images/mp_test_3_expected.png)
-
-Measured waveform placeholder:
-![MP Test 3 Results](images/mp_test_3_results.png)
+#### Trace Task IDs
+- `Migrator M -> 1`
+- `Blocker B0 -> 2`
+- `Blocker B1 -> 4`
 
 #### Expected
-- Same task ID should appear on core 0 in one job and core 1 in another job under interference changes.
-- Migration should not violate EDF ordering among runnable tasks.
+- A globally runnable task may execute on different cores across different jobs.
+- Migration should still preserve EDF ordering among runnable jobs.
 
-#### Actual
--
+#### Measured Waveform
+![Test 3 MP Global Waveform](<../test_assets/MP Tests/Global EDF Tests/Test 3/Test 3 MP Global Waveform.png>)
 
-#### Verified
-- Global-task migration across cores is supported and observable on GPIO banks.
+### Test 4 - Overrun and Deadline Miss Trace
+#### Test Implementation
+- File: `mp_tests/global_edf_tests/test_4.c`
+- Entry point: `mp_global_edf_4_run()`
 
-## Test 4 - Global EDF Affinity Enforcement
-### Task Table
-| Task/Class | Timing Definition | Affinity | First Release (ms) |
-|---|---|---|---:|
-| Pinned tasks + unrestricted tasks (see `mp_tests/global_edf_tests/test_5.c`) | defined in source | mixed pinned/unrestricted | 0 |
+#### Trace Task IDs
+- `G4 OVR -> 1`
+- `G4 N1 -> 2`
+- `G4 N2 -> 4`
 
-### Description of Test
-Ensures per-task affinity masks are respected even while unrestricted tasks are globally scheduled.
+#### Expected
+- The designated overrun task should trigger a WCET-overrun print first and then a deadline-miss print.
+- The deadline-miss GPIO should pulse when the miss occurs.
+- The scheduler should continue running after the miss.
 
-### Test Implementation
+#### Notes
+- This test flushes deferred WCET/deadline/MP UART output immediately before `xTaskDelayUntil()`. If the flush work makes `xTaskDelayUntil()` return late, the task re-anchors `xLastWakeTime` to the current tick. Later printed release/deadline/next-release values can therefore drift away from exact period multiples even though the progression remains deterministic.
+
+#### Measured Waveform
+![Test 4 MP Global Waveform](<../test_assets/MP Tests/Global EDF Tests/Test 4/Test 4 MP Global Waveform.png>)
+
+#### Console Output
+![Test 4 MP Global Output](<../test_assets/MP Tests/Global EDF Tests/Test 4/Test 4 MP Global Output.png>)
+
+### Test 5 - Affinity Enforcement
+#### Test Implementation
 - File: `mp_tests/global_edf_tests/test_5.c`
 - Entry point: `mp_global_edf_5_run()`
 
-### Expected Results and Results
-Expected waveform placeholder:
-![MP Test 4 Expected](images/mp_test_4_expected.png)
-
-Measured waveform placeholder:
-![MP Test 4 Results](images/mp_test_4_results.png)
-
-#### Expected
-- Pinned task IDs appear only on their assigned core bank for the full run.
-- Unrestricted task IDs may appear on either core.
-
-#### Actual
--
-
-#### Verified
-- Affinity-mask enforcement remains correct under global EDF.
-
-## Test 5 - Partitioned EDF Basic Dispatch
-### Task Table
-| Task/Class | Timing Definition | Affinity | First Release (ms) |
-|---|---|---|---:|
-| Partition-owned tasks (see `mp_tests/partitioned_edf_tests/test_1.c`) | defined in source | explicit one-hot partition affinity | 0 |
-
-### Description of Test
-Baseline partitioned EDF ownership test to confirm tasks execute only on their assigned partition/core.
-
-### Test Implementation
-- File: `mp_tests/partitioned_edf_tests/test_1.c`
-- Entry point: `mp_partitioned_edf_1_run()`
-
-### Expected Results and Results
-Expected waveform placeholder:
-![MP Test 5 Expected](images/mp_test_5_expected.png)
-
-Measured waveform placeholder:
-![MP Test 5 Results](images/mp_test_5_results.png)
+#### Trace Task IDs
+- `G5 Free0 -> 1`
+- `G5 Core0 -> 2`
+- `G5 Core1 -> 4`
+- `G5 Free1 -> 8`
 
 #### Expected
-- Each task ID appears only on its assigned core bank.
-- No cross-partition execution occurs without explicit migration/affinity change.
+- Pinned tasks should stay on their assigned core for the full run.
+- Unrestricted tasks may appear on either core.
 
-#### Actual
--
+#### Measured Waveform
+![Test 5 MP Global Waveform](<../test_assets/MP Tests/Global EDF Tests/Test 5/Test 5 MP Global Waveform.png>)
 
-#### Verified
-- Partition ownership enforcement works for static affinities.
-
-## Test 6 - Partitioned EDF Explicit Migration
-### Task Table
-| Task/Class | Timing Definition | Affinity | Migration Event |
-|---|---|---|---|
-| Migration scenario tasks (see `mp_tests/partitioned_edf_tests/test_2.c`) | defined in source | changed at runtime | controller-triggered affinity update |
-
-### Description of Test
-Controller changes a task's affinity from one partition/core to the other.
-
-### Test Implementation
-- File: `mp_tests/partitioned_edf_tests/test_2.c`
-- Entry point: `mp_partitioned_edf_2_run()`
-
-### Expected Results and Results
-Expected waveform placeholder:
-![MP Test 6 Expected](images/mp_test_6_expected.png)
-
-Measured waveform placeholder:
-![MP Test 6 Results](images/mp_test_6_results.png)
-
-#### Expected
-- Before migration instant, migrating task appears only on original core bank.
-- After migration instant, task appears only on new core bank.
-
-#### Actual
--
-
-#### Verified
-- Runtime affinity change is honored by partitioned EDF scheduler.
-
-## Test 7 - MP Admission Control
-### Task Table
-| Task/Class | Period/WCET Source | Affinity/Policy | Creation Phase |
-|---|---|---|---|
-| Baseline tasks + bad/good candidates (`mp_tests/test_1.c`) | mode-dependent macros in source | active MP mode | startup and/or controller |
-
-### Description of Test
-Admission-control validation in MP mode with both unschedulable and schedulable candidates.
-
-### Test Implementation
-- File: `mp_tests/test_1.c`
-- Entry point: `mp_edf_admission_1_run()`
-
-### Expected Results and Results
-Expected waveform placeholder:
-![MP Test 7 Expected](images/mp_test_7_expected.png)
-
-Measured waveform placeholder:
-![MP Test 7 Results](images/mp_test_7_results.png)
-
-#### Expected
-- Bad candidate creation returns `pdFAIL`.
-- Good candidate creation returns `pdPASS`.
-- Rejected task does not appear on either core GPIO bank.
-
-#### Actual
--
-- Bad admission return:
-- Good admission return:
-
-#### Verified
-- MP admission-control path distinguishes feasible/infeasible candidates.
-- Admit/reject API outcomes match observed runtime presence/absence.
-
-## Test 8 - MP Runtime Task Creation
-### Task Table
-| Task/Class | Period/WCET Source | Affinity/Policy | Creation Phase |
-|---|---|---|---|
-| Runtime create scenario (`mp_tests/test_2.c`) | mode-dependent macros in source | active MP mode | after scheduler start |
-
-### Description of Test
-Controller creates candidate tasks during runtime to verify dynamic insertion behavior in MP EDF mode.
-
-### Test Implementation
-- File: `mp_tests/test_2.c`
-- Entry point: `mp_edf_runtime_create_1_run()`
-
-### Expected Results and Results
-Expected waveform placeholder:
-![MP Test 8 Expected](images/mp_test_8_expected.png)
-
-Measured waveform placeholder:
-![MP Test 8 Results](images/mp_test_8_results.png)
-
-#### Expected
-- Runtime good candidate is admitted and appears on an eligible core bank.
-- Runtime bad candidate is rejected and remains absent from both banks.
-- Existing workload continues without scheduler stall.
-
-#### Actual
--
-- Runtime bad admission return:
-- Runtime good admission return:
-
-#### Verified
-- Runtime task admission while scheduler is active.
-- MP policy handles dynamic task insertion/rejection correctly.
-
-## Test 9 - Global EDF Demo Compare
-### Task Table
-| Task/Class | Timing Definition | Affinity | First Release (ms) |
-|---|---|---|---:|
-| Demo global set (`mp_tests/test_compare_glob.c`) | defined in source | unrestricted/global | 0 |
-
-### Description of Test
-Presentation/demo scenario for visualizing global EDF behavior on two cores.
-
-### Test Implementation
-- File: `mp_tests/test_compare_glob.c`
-- Entry point: `mp_compare_glob_run()`
-
-### Expected Results and Results
-Expected waveform placeholder:
-![MP Test 9 Expected](images/mp_test_9_expected.png)
-
-Measured waveform placeholder:
-![MP Test 9 Results](images/mp_test_9_results.png)
-
-#### Expected
-- Two-core execution reflects global EDF ordering for demo task set.
-
-#### Actual
--
-
-#### Verified
-- Demo waveform matches intended global EDF narrative.
-
-## Test 10 - Partitioned EDF Best-Fit Demo
-### Task Table
-| Task/Class | Timing Definition | Affinity | Placement Rule |
-|---|---|---|---|
-| Demo partitioned set (`mp_tests/test_compare_part.c`) | defined in source | initially unpinned/create-time decided | best-fit partition selection |
-
-### Description of Test
-Demo scenario showing partition assignment behavior for non-explicitly pinned tasks.
-
-### Test Implementation
-- File: `mp_tests/test_compare_part.c`
-- Entry point: `mp_compare_part_run()`
-
-### Expected Results and Results
-Expected waveform placeholder:
-![MP Test 10 Expected](images/mp_test_10_expected.png)
-
-Measured waveform placeholder:
-![MP Test 10 Results](images/mp_test_10_results.png)
-
-#### Expected
-- New tasks are assigned to partitions according to best-fit placement rule.
-- After placement, each task executes only on its selected partition core.
-
-#### Actual
--
-
-#### Verified
-- Partition placement heuristic behavior is observable and stable.
-
-## Test 11 - Conservative Global Admission (Dhall)
-### Task Table
-| Task/Class | Timing Definition | Affinity | Admission Criterion |
-|---|---|---|---|
-| Dhall-bound scenario (`mp_tests/global_edf_tests/test_dhall.c`) | defined in source | unrestricted/global | sufficient-bound check |
-
-### Description of Test
-Demonstrates that sufficient-bound-based global admission may reject a candidate even when raw total capacity appears available.
-
-### Test Implementation
+### Dhall Test - Conservative Global Admission
+#### Test Implementation
 - File: `mp_tests/global_edf_tests/test_dhall.c`
 - Entry point: `mp_test_dhall_run()`
 
-### Expected Results and Results
-Expected waveform placeholder:
-![MP Test 11 Expected](images/mp_test_11_expected.png)
-
-Measured waveform placeholder:
-![MP Test 11 Results](images/mp_test_11_results.png)
+#### Trace Task IDs
+- `Heavy -> 1`
+- `Light -> 2`
+- `Bad candidate` is expected to be rejected and should not appear on the trace pins
 
 #### Expected
-- Candidate violating the configured sufficient bound is rejected (`pdFAIL`).
-- Accepted tasks continue running normally on both cores.
+- A candidate that violates the configured sufficient bound should be rejected even if raw total utilization still appears below total capacity.
+- The already-admitted tasks should continue running normally.
 
-#### Actual
--
-- Dhall candidate admission return:
+#### Measured Waveform
+![Dhall Test MP Global Waveform](<../test_assets/MP Tests/Global EDF Tests/Dhall Test/Dhall Test MP Global Waveform.png>)
 
-#### Verified
-- Conservative global admission bound is enforced in implementation.
+## Partitioned EDF Tests
+
+### Test 1 - Basic Dispatch
+#### Test Implementation
+- File: `mp_tests/partitioned_edf_tests/test_1.c`
+- Entry point: `mp_partitioned_edf_1_run()`
+
+#### Trace Task IDs
+- `P0A -> 1`
+- `P0B -> 2`
+- `P1A -> 4`
+
+#### Expected
+- Each task should execute only on its assigned partition/core.
+- No cross-partition execution should occur without an explicit affinity change.
+
+#### Measured Waveform
+![Test 1 MP Partitioned Waveform](<../test_assets/MP Tests/Partitioned EDF Tests/Test 1/Test 1 MP Partitioned Waveform.png>)
+
+### Test 2 - Explicit Migration
+#### Test Implementation
+- File: `mp_tests/partitioned_edf_tests/test_2.c`
+- Entry point: `mp_partitioned_edf_2_run()`
+
+#### Trace Task IDs
+- `Migrating task -> 1`
+- `Core-0 background -> 2`
+- `Core-1 background -> 4`
+
+#### Expected
+- Before the runtime affinity change, the migrating task should appear only on its original core.
+- In this implementation, the currently executing job may finish on the original core after migration is requested.
+- The migrated affinity should become visible on the next released job.
+
+#### Measured Waveform
+![Test 2 MP Partitioned Waveform](<../test_assets/MP Tests/Partitioned EDF Tests/Test 2/Test 2 MP Partitioned Waveform.png>)
+
+### Test 3 - Overrun and Deadline Miss Trace
+#### Test Implementation
+- File: `mp_tests/partitioned_edf_tests/test_3.c`
+- Entry point: `mp_partitioned_edf_3_run()`
+
+#### Trace Task IDs
+- `P3 C0O -> 1`
+- `P3 C0N -> 2`
+- `P3 C1O -> 4`
+- `P3 C1N -> 3`
+
+#### Expected
+- The designated overrun tasks should trigger WCET-overrun prints and then deadline-miss prints.
+- The deadline-miss GPIO should assert on real misses.
+- Partition ownership should continue to hold after recovery.
+
+#### Notes
+- This test also flushes deferred WCET/deadline/MP UART output immediately before `xTaskDelayUntil()`. If the flush work makes `xTaskDelayUntil()` return late, the task re-anchors `xLastWakeTime` to the current tick. Later printed release/deadline/next-release values can therefore drift away from exact period multiples even though the progression remains deterministic.
+
+#### Measured Waveform
+![Test 3 MP Partitioned Waveform](<../test_assets/MP Tests/Partitioned EDF Tests/Test 3/Test 3 MP Partitioned Waveform.png>)
+
+#### Console Output
+![Test 3 MP Partitioned Output](<../test_assets/MP Tests/Partitioned EDF Tests/Test 3/Test 3 MP Partitioned Output.png>)
+
+## Admission Tests
+
+### Test 1 - Startup Admission
+#### Test Implementation
+- Shared MP admission test assets captured for both policy modes.
+
+#### Trace Task IDs
+- `Base 1 -> 1`
+- `Base 2 -> 2`
+- `Good candidate -> 4` when admitted after the delayed create
+- `Admission controller -> 7`
+- `Bad candidate` is expected to be rejected and should not appear on the trace pins
+
+#### Expected
+- Unschedulable candidates should be rejected.
+- Schedulable candidates should be admitted.
+- The waveform and result flags should agree.
+
+#### Global EDF Waveform
+![Test 1 MP Admission Global Waveform](<../test_assets/MP Tests/Admission Tests/Test 1 MP Admission Global Waveform.png>)
+
+#### Global EDF Result Flags
+![Test 1 MP Admission Global Result Flags](<../test_assets/MP Tests/Admission Tests/Test 1 MP Admission Global Result Flags.png>)
+
+#### Partitioned EDF Waveform
+![Test 1 MP Admission Partitioned Waveform](<../test_assets/MP Tests/Admission Tests/Test 1 MP Admission Partitioned Waveform.png>)
+
+#### Partitioned EDF Result Flags
+![Test 1 MP Admission Partitioned Result Flags](<../test_assets/MP Tests/Admission Tests/Test 1 MP Admission Partitioned Result Flags.png>)
+
+### Test 2 - Runtime Admission / Runtime Create
+#### Test Implementation
+- Shared MP runtime admission/create test assets captured for both policy modes.
+
+#### Trace Task IDs
+- `Base 1 -> 1`
+- `Base 2 -> 2`
+- `Good runtime task -> 4` when admitted at runtime
+- `Controller -> 7`
+- `Bad runtime task` is expected to be rejected and should not appear on the trace pins
+
+#### Expected
+- Runtime creation should admit feasible tasks and reject infeasible ones without stalling the scheduler.
+- The saved flags should match the observed core activity.
+
+#### Global EDF Waveform
+![Test 2 MP Admission Global Waveform](<../test_assets/MP Tests/Admission Tests/Test 2 MP Admission Global Waveform.png>)
+
+#### Global EDF Result Flag
+![Test 2 MP Admission Global Result Flag](<../test_assets/MP Tests/Admission Tests/Test 2 MP Admission Global Result Flag.png>)
+
+#### Partitioned EDF Waveform
+![Test 2 MP Admission Partitioned Waveform](<../test_assets/MP Tests/Admission Tests/Test 2 MP Admission Partitioned Waveform.png>)
+
+#### Partitioned EDF Result Flags
+![Test 2 MP Admission Partitioned Result Flags](<../test_assets/MP Tests/Admission Tests/Test 2 MP Admission Partitioned Result Flags.png>)
+
+## Comparison Test
+
+### Global EDF Comparison
+#### Test Implementation
+- File: `mp_tests/test_compare_glob.c`
+- Entry point: `mp_compare_glob_run()`
+
+#### Trace Task IDs
+- `GDemoA -> 1`
+- `GDemoB -> 2`
+- `GDemoC -> 4`
+
+#### Measured Waveform
+![Comparison Test MP Global Waveform](<../test_assets/MP Tests/comparison test/Comparison Test MP Global Waveform.png>)
+
+#### Annotation
+![Comparison Test MP Global Caption](<../test_assets/MP Tests/comparison test/Comparison Test MP Global Caption.png>)
+
+### Partitioned EDF Comparison
+#### Test Implementation
+- File: `mp_tests/test_compare_part.c`
+- Entry point: `mp_compare_part_run()`
+
+#### Trace Task IDs
+- `PDemoA -> 1`
+- `PDemoB -> 2`
+- `PDemoC -> 4`
+
+#### Measured Waveform
+![Comparison Test MP Partitioned Waveform](<../test_assets/MP Tests/comparison test/Comparison Test MP Partitioned Waveform.png>)
+
+#### Annotation
+![Comparison Test MP Partitioned Caption](<../test_assets/MP Tests/comparison test/Comparison Test MP Partitioned Caption.png>)

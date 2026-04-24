@@ -43,7 +43,11 @@ void vTraceClearTaskSwitchSignal( void );
 void vTraceSignalDeadlineMiss( void );
 void vTraceClearDeadlineMissSignal( void );
 void vTraceDeadlineMissTick( void );
+void vTraceRecordDeadlineMiss( uint32_t ulTaskId );
+void vTraceFlushDeadlineMissEvents( void );
 void vApplicationDeadlineMissHook( uint32_t ulTaskId );
+void vApplicationWcetOverrunHook( uint32_t ulTaskId );
+void vTraceFlushWcetOverrunEvents( void );
 
 #if ( configUSE_MP == 1 ) && ( configNUMBER_OF_CORES > 1 )
 void vTraceRecordMPOverrunEvent( const char * pcPolicy,
@@ -70,12 +74,20 @@ void vApplicationStackOverflowHook( struct tskTaskControlBlock * xTask, char * p
 #define traceTASK_SWITCHED_IN()    vTraceTaskSwitchedIn( ( uint32_t ) ( uintptr_t ) pxCurrentTCB->pxTaskTag )
 
 #define traceTASK_SWITCHED_OUT()    vTraceClearTaskSwitchSignal()
-#define traceTASK_DEADLINE_MISSED()            \
+#define traceTASK_DEADLINE_MISSED_FOR_TASK( pxTask )            \
     do                                         \
     {                                          \
         vTraceSignalDeadlineMiss();            \
-        vApplicationDeadlineMissHook( ( uint32_t ) ( uintptr_t ) pxCurrentTCB->pxTaskTag ); \
+        vTraceRecordDeadlineMiss( ( uint32_t ) ( uintptr_t ) ( pxTask )->pxTaskTag ); \
+        vApplicationDeadlineMissHook( ( uint32_t ) ( uintptr_t ) ( pxTask )->pxTaskTag ); \
     } while( 0 )
+#define traceTASK_DEADLINE_MISSED()    traceTASK_DEADLINE_MISSED_FOR_TASK( pxCurrentTCB )
+#define traceTASK_WCET_OVERRUN_FOR_TASK( pxTask ) \
+    do                                            \
+    {                                             \
+        vApplicationWcetOverrunHook( ( uint32_t ) ( uintptr_t ) ( pxTask )->pxTaskTag ); \
+    } while( 0 )
+#define traceTASK_WCET_OVERRUN()    traceTASK_WCET_OVERRUN_FOR_TASK( pxCurrentTCB )
 #define traceTASK_INCREMENT_TICK( xTickCount )    vTraceDeadlineMissTick()
 
 #ifdef __cplusplus

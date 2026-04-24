@@ -109,7 +109,8 @@ This document summarizes the FreeRTOS changes made for multiprocessor EDF suppor
   - Extended so partitioned EDF affinity changes perform explicit partition migration.
 - `xTaskIncrementTick()`
   - Extended so MP EDF accounts execution time for the task running on each core.
-  - Handles WCET exhaustion and deadline miss by advancing the job, delaying the task, and yielding the affected core.
+  - Reports WCET overruns through the trace hook when a task is still executing at its WCET boundary.
+  - Handles only real deadline misses by advancing the job, delaying the task, and yielding the affected core.
 - `xTaskDelayUntil()`
   - Updated so EDF release/deadline metadata is advanced in the correct UP, global, or partitioned EDF registry list.
 
@@ -117,4 +118,4 @@ This document summarizes the FreeRTOS changes made for multiprocessor EDF suppor
 
 The implementation keeps MP EDF integrated with FreeRTOS's existing SMP machinery rather than creating a separate scheduler task. There is still one kernel and one context-switch path; the part that changes is the task selector used by that path.
 
-Global EDF uses one shared scheduling domain. Partitioned EDF uses per-core scheduling domains. Both policies share the same task metadata, timing model, and tick-time overrun handling.
+Global EDF uses one shared scheduling domain. Partitioned EDF uses per-core scheduling domains. Both policies share the same task metadata, timing model, WCET-overrun hook, and deadline-miss cleanup path.

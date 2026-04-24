@@ -16,5 +16,5 @@
 - Updated `xTaskResumeAll()` so when deferred-ready tasks are released after scheduler suspension, the kernel requests a yield using absolute-deadline comparison instead of fixed-priority comparison; otherwise EDF-preemptible tasks could be resumed without triggering the correct context switch.
 - Updated `xTaskDelayUntil()` so EDF tasks refresh absolute release time, absolute deadline, and per-job execution budget on each periodic release.
 - Updated `xTaskIncrementTick()` so the currently running EDF task accumulates execution time each tick.
-- Added WCET and deadline handling in `xTaskIncrementTick()` so a task that exhausts its budget or misses its deadline is delayed until its next release.
+- Added WCET and deadline handling in `xTaskIncrementTick()` so the running task reports a WCET overrun when it is still executing at its WCET boundary, while only a real deadline miss advances the job to its next release and delays the task.
 - Removed EDF tasks from the EDF registry list when they are deleted.

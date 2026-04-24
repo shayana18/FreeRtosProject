@@ -7,11 +7,16 @@
 
 # EDF Software Testing Setup
 - EDF tests are in the `edf_tests` folder.
+- The captured hardware assets for this document live under `assignment_md_files/test_assets/EDF Tests/`.
 - Each test exposes an `edf_X_run()` entry point called from `main.c`.
 - Only one test should be enabled in `main.c` at a time, then compile and flash to run that scenario.
 - Common trace and helper utilities are in `task_trace.c/h` and `test_utils.c/h`.
 
 # EDF Test Methods
+- Task IDs are observed on the GPIO task-code pins and decoded using the task-switch strobe as a sampling clock. On the waveform, the strobe edge marks when the binary task-code output should be read.
+- In the normal binary-trace setup, up to 7 GPIO bits can be used for task ID output. When a given test has fewer tasks and deadline-miss observation is important, the highest binary-output pin may instead be repurposed as a direct deadline-miss probe.
+- When a test has very few tasks, one-hot encoding may be used instead of binary encoding to make the waveform easier to read directly.
+- For precise timing analysis, the captured discussion in this document focuses on smaller windows that are sufficient to prove the intended scheduling or synchronization feature. We intentionally do not require full-hyperperiod inspection for every test when a shorter interval already demonstrates correctness.
 - For small task sets, manually derive expected scheduling windows (typically first ~30 s) and compare against logic-analyzer traces.
 - For admission-control tests, verify both task-creation return values and waveform behavior.
 - For larger stress tests, verify absence of deadline-miss pulses and spot-check fairness/order patterns.
@@ -46,12 +51,17 @@ Baseline implicit-deadline EDF sanity test with three periodic tasks released fr
 - File: `edf_tests/test_1.c`
 - Entry point: `edf_1_run()`
 
-### Expected Results and Results
-Expected waveform placeholder:
-![Test 1 Expected](images/edf_test_1_expected.png)
+### Trace Task IDs
+- `Task1 -> 1`
+- `Task2 -> 2`
+- `Task3 -> 4`
 
-Measured waveform placeholder:
-![Test 1 Results](images/edf_test_1_results.png)
+### Expected Results and Results
+Expected waveform:
+![Test 1 EDF Answer](<../test_assets/EDF Tests/Test 1/Test 1 EDF Answer.jpg>)
+
+Measured waveform:
+![Test 1 EDF Waveform](<../test_assets/EDF Tests/Test 1/Test 1 EDF Waveform.png>)
 
 #### Expected
 - At `t=0s`, all jobs are released and Task 1 (earliest absolute deadline) starts first.
@@ -84,12 +94,15 @@ Implicit-deadline harmonic task set with total utilization 15/16 (0.9375). This 
 - File: `edf_tests/test_2.c`
 - Entry point: `edf_2_run()`
 
-### Expected Results and Results
-Expected waveform placeholder:
-![Test 2 Expected](images/edf_test_2_expected.png)
+### Trace Task IDs
+- `T1 -> 1`
+- `T2 -> 2`
+- `T3 -> 4`
+- `T4 -> 8`
 
-Measured waveform placeholder:
-![Test 2 Results](images/edf_test_2_results.png)
+### Expected Results and Results
+Measured waveform:
+![Test 2 EDF Waveform](<../test_assets/EDF Tests/Test 2/Test 2 EDF Waveform.png>)
 
 #### Expected
 - At `t=0s`, T1/T2/T3/T4 all release together with deadlines at `2s`, `4s`, `8s`, and `16s`, so T1 must execute first.
@@ -121,12 +134,17 @@ Starts with a schedulable baseline implicit-deadline set. A bad candidate is att
 - File: `edf_tests/test_3.c`
 - Entry point: `edf_3_run()`
 
-### Expected Results and Results
-Expected waveform placeholder:
-![Test 3 Expected](images/edf_test_3_expected.png)
+### Trace Task IDs
+- `Baseline B1 -> 1`
+- `Baseline B2 -> 2`
+- `Baseline B3 -> 4`
+- `Good Candidate -> 8` when admitted after the delayed create
+- `Admission Controller -> 64`
+- `Bad Candidate` is expected to be rejected and therefore should not appear on the trace pins
 
-Measured waveform placeholder:
-![Test 3 Results](images/edf_test_3_results.png)
+### Expected Results and Results
+Measured waveform:
+![Test 3 EDF Waveform](<../test_assets/EDF Tests/Test 3/Test 3 EDF Waveform.png>)
 
 #### Expected
 - At startup (`t~0s`), the initial bad candidate create call should return rejection immediately.
@@ -160,12 +178,17 @@ Constrained-deadline EDF test with all tasks released synchronously. Used to ver
 - File: `edf_tests/test_4.c`
 - Entry point: `edf_4_run()`
 
-### Expected Results and Results
-Expected waveform placeholder:
-![Test 4 Expected](images/edf_test_4_expected.png)
+### Trace Task IDs
+- `T1 -> 1`
+- `T2 -> 2`
+- `T3 -> 4`
 
-Measured waveform placeholder:
-![Test 4 Results](images/edf_test_4_results.png)
+### Expected Results and Results
+Expected waveform:
+![Test 4 EDF Answer](<../test_assets/EDF Tests/Test 4/Test 4 EDF Answer.jpg>)
+
+Measured waveform:
+![Test 4 EDF CD Waveform](<../test_assets/EDF Tests/Test 4/Test 4 EDF CD Waveform.png>)
 
 #### Expected
 - At `t=0s`, all three tasks release with absolute deadlines at `3s`, `3.5s`, and `8s`, so first dispatch order should be T1 before T2 before T3.
@@ -196,12 +219,18 @@ Constrained-deadline task set with higher aggregate load than Test 4. Intended t
 - File: `edf_tests/test_5.c`
 - Entry point: `edf_5_run()`
 
-### Expected Results and Results
-Expected waveform placeholder:
-![Test 5 Expected](images/edf_test_5_expected.png)
+### Trace Task IDs
+- `T1 -> 1`
+- `T2 -> 2`
+- `T3 -> 4`
+- `T4 -> 8`
 
-Measured waveform placeholder:
-![Test 5 Results](images/edf_test_5_results.png)
+### Expected Results and Results
+Expected waveform:
+![Test 5 EDF Answer](<../test_assets/EDF Tests/Test 5/Test 5 EDF Answer.png>)
+
+Measured waveform:
+![Test 5 EDF Waveform](<../test_assets/EDF Tests/Test 5/Test 5 EDF Waveform.png>)
 
 #### Expected
 - At `t=0s`, all tasks release with deadlines `3s`, `5s`, `7s`, and `10s`; initial order should prioritize T1 then T2 before later-deadline jobs.
@@ -232,12 +261,16 @@ Constrained-deadline admission-control scenario. A bad candidate (tight deadline
 - File: `edf_tests/test_6.c`
 - Entry point: `edf_6_run()`
 
-### Expected Results and Results
-Expected waveform placeholder:
-![Test 6 Expected](images/edf_test_6_expected.png)
+### Trace Task IDs
+- `Baseline B1 -> 1`
+- `Baseline B2 -> 2`
+- `Good Candidate -> 4` when admitted
+- `Bad Candidate` is expected to be rejected and should not appear on the trace pins
+- If the bad candidate ever appears, the code assigns it `8` specifically to flag unexpected admission
 
-Measured waveform placeholder:
-![Test 6 Results](images/edf_test_6_results.png)
+### Expected Results and Results
+Measured waveform:
+![Test 6 EDF Waveform](<../test_assets/EDF Tests/Test 6/Test 6 EDF Waveform.png>)
 
 #### Expected
 - At startup before scheduler launch (`t~0s` setup phase), bad constrained candidate create should return reject.
@@ -270,12 +303,16 @@ Implicit-deadline admission scenario (all tasks have D = T), which should follow
 - File: `edf_tests/test_7.c`
 - Entry point: `edf_7_run()`
 
-### Expected Results and Results
-Expected waveform placeholder:
-![Test 7 Expected](images/edf_test_7_expected.png)
+### Trace Task IDs
+- `Baseline B1 -> 1`
+- `Baseline B2 -> 2`
+- `Good Candidate -> 4` when admitted
+- `Bad Candidate` is expected to be rejected and should not appear on the trace pins
+- If the bad candidate ever appears, the code assigns it `8` specifically to flag unexpected admission
 
-Measured waveform placeholder:
-![Test 7 Results](images/edf_test_7_results.png)
+### Expected Results and Results
+Measured waveform:
+![Test 7 EDF Waveform](<../test_assets/EDF Tests/Test 7/Test 7 EDF Waveform.png>)
 
 #### Expected
 - At startup before scheduler launch (`t~0s` setup phase), bad implicit candidate create should be rejected on utilization grounds.
@@ -301,27 +338,35 @@ Measured waveform placeholder:
 | T3 | 500 | 4000 | 4000 | 0 |
 | T4 | 600 | 5000 | 5000 | 0 |
 | T5 | 650 | 7000 | 7000 | 0 |
-| T6 (periodic miss) | 900 | 9000 | 2200 | 0 |
-| T7 (periodic miss) | 1200 | 12000 | 2500 | 0 |
+| T6 (periodic miss) | 700 | 4000 | 1800 | 0 |
+| T7 (periodic miss) | 900 | 6000 | 2200 | 0 |
 
 ### Description of Test
-Mixed behavior scenario with five always-meeting tasks and two intentionally periodic-miss tasks. T6 and T7 overrun every Nth job by design to confirm deadline-miss detection and trace behavior while other tasks continue periodic execution.
+Mixed behavior scenario with five always-meeting tasks and two intentionally periodic-miss tasks. T6 and T7 now miss on their second jobs so the first deadline-miss pulses appear early in the run, which makes the waveform easier to inspect in the first 10 seconds while still confirming the separation between WCET-overrun reporting and deadline-miss handling.
+
+Because the miss-task code flushes deferred WCET/deadline UART output immediately before `xTaskDelayUntil()`, a late return from `xTaskDelayUntil()` can cause the task to re-anchor its local `xLastWakeTime` to the current tick. When that happens, later printed release/deadline values may drift away from neat period multiples even though the behavior is still deterministic.
 
 ### Test Implementation
 - File: `edf_tests/test_8.c`
 - Entry point: `edf_8_run()`
 
-### Expected Results and Results
-Expected waveform placeholder:
-![Test 8 Expected](images/edf_test_8_expected.png)
+### Trace Task IDs
+- `T1 -> 1`
+- `T2 -> 2`
+- `T3 -> 3`
+- `T4 -> 4`
+- `T5 -> 5`
+- `T6 -> 6`
+- `T7 -> 7`
 
-Measured waveform placeholder:
-![Test 8 Results](images/edf_test_8_results.png)
+### Expected Results and Results
+Measured waveform:
+![Test 8 EDF Waveform](<../test_assets/EDF Tests/Test 8/Test 8 EDF Waveform.png>)
 
 #### Expected
 - T1-T5 should maintain regular periodic execution with no forced overruns.
-- T7 is configured to overrun every 3rd job: with releases at `0s, 12s, 24s, 36s, ...`, miss events are expected around jobs released at `24s, 60s, ...`.
-- T6 is configured to overrun every 4th job: with releases at `0s, 9s, 18s, 27s, ...`, miss events are expected around jobs released at `27s, 63s, ...`.
+- T7's first intentional deadline miss is expected at about `t=5.8s`.
+- T6's second-job intentional deadline miss is expected at about `t=8.2s`.
 - Deadline-miss indicator should pulse around those windows, and normal dispatch should resume afterward.
 
 #### Actual
@@ -329,7 +374,7 @@ Measured waveform placeholder:
 - Deadline miss count observed:
 
 #### Verified
-- Overrun management/deadline-miss handling was exercised by intentional periodic overruns without collapsing scheduler progress.
+- WCET-overrun reporting and deadline-miss handling were both exercised by intentional long-running jobs without collapsing scheduler progress.
 - Mixed workload behavior (always-meet tasks plus forced-miss tasks) remained observable and recoverable over time.
 - EDF was enabled via configuration and continued normal dispatch between miss events.
 
@@ -352,12 +397,13 @@ Scalability stress test with 100 periodic tasks. All tasks share the same period
 - File: `edf_tests/test_9.c`
 - Entry point: `edf_9_run()`
 
-### Expected Results and Results
-Expected waveform placeholder:
-![Test 9 Expected](images/edf_test_9_expected.png)
+### Trace Task IDs
+- `Task i -> i` for `i = 1..100`
+- The application task tag matches the numbered task name directly in this stress test
 
-Measured waveform placeholder:
-![Test 9 Results](images/edf_test_9_results.png)
+### Expected Results and Results
+Measured waveform:
+![Test 9 EDF Waveform](<../test_assets/EDF Tests/Test 9/Test 9 EDF Waveform.png>)
 
 #### Expected
 - At `t=0s`, all 100 tasks are released; earliest-deadline tasks (Task 1, Task 2, ...) should appear before later-deadline tasks in the first major window.

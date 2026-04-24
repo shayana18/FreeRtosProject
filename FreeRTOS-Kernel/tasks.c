@@ -40,6 +40,7 @@
 /* FreeRTOS includes. */
 #include "FreeRTOS.h"
 #include "task.h"
+#include "queue.h"
 #include "timers.h"
 #include "stack_macros.h"
 #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
@@ -443,6 +444,7 @@ typedef struct tskTaskControlBlock       /* The old naming convention is used to
         TickType_t xPeriodTicks;             /**< Task period in ticks. */
         TickType_t xWcetTicks;               /**< WCET budget in ticks. */
         TickType_t xJobExecTicks;            /**< Number of ticks spent on current job. */
+        BaseType_t xWcetOverrunReported;     /**< pdTRUE once the current job has already reported a WCET overrun. */
         TickType_t xRelDeadline;             /**< Relative deadline in ticks. */
         TickType_t xAbsDeadline;             /**< Absolute deadline in ticks. */
         ListItem_t xEDFTaskListItem;         /**< Used to keep EDF tasks in the EDF task registry list. */
@@ -556,6 +558,22 @@ typedef enum {
          * tick range, which avoids misclassifying wrapped future deadlines as late. */
         return ( ( xDelta != ( TickType_t ) 0U ) &&
                  ( xDelta <= ( TickType_t ) ( portMAX_DELAY / 2U ) ) ) ? pdTRUE : pdFALSE;
+    }
+
+    static BaseType_t prvEDFHasExceededWcet( TickType_t xJobExecTicks,
+                                             TickType_t xWcetTicks )
+    {
+        #if ( configEDF_WCET_OVERRUN_GRACE_TICKS == 0U )
+            return ( xJobExecTicks >= xWcetTicks ) ? pdTRUE : pdFALSE;
+        #else
+            if( xJobExecTicks <= xWcetTicks )
+            {
+                return pdFALSE;
+            }
+
+            return ( ( xJobExecTicks - xWcetTicks ) >=
+                     ( TickType_t ) configEDF_WCET_OVERRUN_GRACE_TICKS ) ? pdTRUE : pdFALSE;
+        #endif
     }
 
 #endif
@@ -769,6 +787,7 @@ PRIVILEGED_DATA static volatile configRUN_TIME_COUNTER_TYPE ulTotalRunTime[ conf
         #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
             static UBaseType_t uxSRPResourceBlockingCeilingTable[ configSRP_RESOURCE_TYPE_COUNT ];
             static UBaseType_t uxSRPResourceActiveCount[ configSRP_RESOURCE_TYPE_COUNT ]; /* Boolean-like lock state: 0 unlocked, 1 locked. */
+            static QueueHandle_t xSRPResourceSemaphoreHandles[ configSRP_RESOURCE_TYPE_COUNT ];
         #endif
 
         static BaseType_t prvSRPValidateResourceClaims( const SRPResourceClaim_t * pxResourceClaims,
@@ -2274,7 +2293,8 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
 
             if( ( pxCurrent->uxTaskAttributes & taskATTRIBUTE_IS_IDLE ) == 0U )
             {
-                if( listIS_CONTAINED_WITHIN( pxReadyList, &( pxCurrent->xStateListItem ) ) != pdFALSE )
+                if( ( listIS_CONTAINED_WITHIN( pxReadyList, &( pxCurrent->xStateListItem ) ) != pdFALSE ) &&
+                    ( ( pxCurrent->uxCoreAffinityMask & ( ( UBaseType_t ) 1U << ( UBaseType_t ) xCoreID ) ) != 0U ) )
                 {
                     xCurrentIsEligible = pdTRUE;
                 }
@@ -2503,12 +2523,17 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                 List_t * const pxOldRegistryList = &( xEDFTaskRegistryLists_Part_MP[ xOldAssignedCore ] );
                 List_t * const pxNewRegistryList = &( xEDFTaskRegistryLists_Part_MP[ xNewAssignedCore ] );
 
-                if( (listLIST_ITEM_CONTAINER( &( pxTCB->xStateListItem ) ) == pxOldReadyList) || (listLIST_ITEM_CONTAINER( &( pxTCB->xEDFTaskListItem) ) ) == pxOldRegistryList)
+                if( listLIST_ITEM_CONTAINER( &( pxTCB->xEDFTaskListItem ) ) == pxOldRegistryList )
+                {
+                    ( void ) uxListRemove( &( pxTCB->xEDFTaskListItem ) );
+                    vListInsert( pxNewRegistryList, &( pxTCB->xEDFTaskListItem ) );
+                }
+
+                if( ( taskTASK_IS_RUNNING( pxTCB ) == pdFALSE ) &&
+                    ( listLIST_ITEM_CONTAINER( &( pxTCB->xStateListItem ) ) == pxOldReadyList ) )
                 {
                     ( void ) uxListRemove( &( pxTCB->xStateListItem ) );
-                    ( void ) uxListRemove( &( pxTCB->xEDFTaskListItem ) );
                     vListInsert( pxNewReadyList, &( pxTCB->xStateListItem ) );
-                    vListInsert( pxNewRegistryList, &( pxTCB->xEDFTaskListItem ) );
                 }
             }
         /*-----------------------------------------------------------*/
@@ -3837,12 +3862,48 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                 {
                     if( pxTCB->uxSRPResourceHeldCount[ uxResourceType ] != 0U )
                     {
+                        QueueHandle_t xSemaphore = xSRPResourceSemaphoreHandles[ uxResourceType ];
+
+                        if( xSemaphore != NULL )
+                        {
+                            ( void ) xQueueSemaphoreForceGiveSRP( xSemaphore );
+                        }
+
                         uxSRPResourceActiveCount[ uxResourceType ] = 0U;
                         pxTCB->uxSRPResourceHeldCount[ uxResourceType ] = 0U;
                     }
                 }
             #else
                 ( void ) pxTCB;
+            #endif
+        }
+
+    /*-----------------------------------------------------------*/
+
+        void vTaskSRPRegisterResourceSemaphore( UBaseType_t uxResourceType,
+                                                void * pvSemaphoreHandle )
+        {
+            #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
+                QueueHandle_t xSemaphore = ( QueueHandle_t ) pvSemaphoreHandle;
+
+                configASSERT( uxResourceType < ( UBaseType_t ) configSRP_RESOURCE_TYPE_COUNT );
+                configASSERT( xSemaphore != NULL );
+
+                taskENTER_CRITICAL();
+                {
+                    if( xSRPResourceSemaphoreHandles[ uxResourceType ] == NULL )
+                    {
+                        xSRPResourceSemaphoreHandles[ uxResourceType ] = xSemaphore;
+                    }
+                    else
+                    {
+                        configASSERT( xSRPResourceSemaphoreHandles[ uxResourceType ] == xSemaphore );
+                    }
+                }
+                taskEXIT_CRITICAL();
+            #else
+                ( void ) uxResourceType;
+                ( void ) pvSemaphoreHandle;
             #endif
         }
 
@@ -4409,6 +4470,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                             pxNewTCB->xAbsJobReleaseTime = curr_tick;
                             pxNewTCB->xPeriodTicks = xPeriodTicks;
                             pxNewTCB->xJobExecTicks = ( TickType_t ) 0U;
+                            pxNewTCB->xWcetOverrunReported = pdFALSE;
                             pxNewTCB->xWcetTicks = xWcetTicks;
                             pxNewTCB->xRelDeadline = xRelDeadlineTicks;
                             pxNewTCB->xAbsDeadline = curr_tick + xRelDeadlineTicks;
@@ -4526,6 +4588,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                         pxNewTCB->xAbsJobReleaseTime = curr_tick;
                         pxNewTCB->xPeriodTicks = xPeriodTicks;
                         pxNewTCB->xJobExecTicks = ( TickType_t ) 0U;
+                        pxNewTCB->xWcetOverrunReported = pdFALSE;
                         pxNewTCB->xWcetTicks = xWcetTicks;
                         pxNewTCB->xRelDeadline = xRelDeadlineTicks;
                         pxNewTCB->xAbsDeadline = curr_tick + xRelDeadlineTicks;
@@ -4654,6 +4717,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                     pxNewTCB->xAbsJobReleaseTime = curr_tick;
                     pxNewTCB->xPeriodTicks = xPeriodTicks;
                     pxNewTCB->xJobExecTicks = ( TickType_t ) 0U;
+                    pxNewTCB->xWcetOverrunReported = pdFALSE;
                     pxNewTCB->xWcetTicks = xWcetTicks;
                     pxNewTCB->xRelDeadline = xRelDeadlineTicks;
                     pxNewTCB->xAbsDeadline = curr_tick + xRelDeadlineTicks;
@@ -4870,7 +4934,9 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
         /* Default non-EDF/internal tasks to the farthest deadline in EDF mode. */
         pxNewTCB->xAbsJobReleaseTime = xTickCount;
         pxNewTCB->xPeriodTicks = ( TickType_t ) 0U;
+        pxNewTCB->xJobExecTicks = ( TickType_t ) 0U;
         pxNewTCB->xWcetTicks = ( TickType_t ) 0U;
+        pxNewTCB->xWcetOverrunReported = pdFALSE;
         pxNewTCB->xRelDeadline = portMAX_DELAY;
         pxNewTCB->xAbsDeadline = portMAX_DELAY;
 
@@ -6238,7 +6304,6 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
                             if( xCoreID != xNewAssignedCore )
                             {
                                 prvYieldCore( xCoreID );
-                                prvYieldCore( xNewAssignedCore );
                             }
                         }
                         else
@@ -8019,13 +8084,15 @@ BaseType_t xTaskIncrementTick( void )
                                                 pxCurrentTCB->xAbsDeadline ) != pdFALSE )
                             )
                         {
-                            traceTASK_DEADLINE_MISSED();
+                            traceTASK_DEADLINE_MISSED_FOR_TASK( pxCurrentTCB );
                             xStopCurrentJob = pdTRUE;
                         }
-                        else if(
-                                ( pxCurrentTCB->xJobExecTicks >= pxCurrentTCB->xWcetTicks ) )
+                        else if( ( pxCurrentTCB->xWcetOverrunReported == pdFALSE ) &&
+                                 ( prvEDFHasExceededWcet( pxCurrentTCB->xJobExecTicks,
+                                                          pxCurrentTCB->xWcetTicks ) != pdFALSE ) )
                         {
-                            xStopCurrentJob = pdTRUE;
+                            pxCurrentTCB->xWcetOverrunReported = pdTRUE;
+                            traceTASK_WCET_OVERRUN_FOR_TASK( pxCurrentTCB );
                         }
 
                         if( xStopCurrentJob != pdFALSE )
@@ -8118,16 +8185,19 @@ BaseType_t xTaskIncrementTick( void )
                         #endif
                             )
                         {
-                            traceTASK_DEADLINE_MISSED();
+                            traceTASK_DEADLINE_MISSED_FOR_TASK( pxCurrentTCB );
                             xStopCurrentJob = pdTRUE;
                         }
-                        else if( ( pxCurrentTCB->xJobExecTicks >= pxCurrentTCB->xWcetTicks )
+                        else if( ( pxCurrentTCB->xWcetOverrunReported == pdFALSE ) &&
+                                  ( prvEDFHasExceededWcet( pxCurrentTCB->xJobExecTicks,
+                                                           pxCurrentTCB->xWcetTicks ) != pdFALSE )
                         #if ( ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
                             && ( prvTaskIsCBSManaged( pxCurrentTCB ) == pdFALSE )
                         #endif
                             )
                         {
-                            xStopCurrentJob = pdTRUE;
+                            pxCurrentTCB->xWcetOverrunReported = pdTRUE;
+                            traceTASK_WCET_OVERRUN_FOR_TASK( pxCurrentTCB );
                         }
 
                         if( xStopCurrentJob != pdFALSE )
@@ -8183,10 +8253,10 @@ BaseType_t xTaskIncrementTick( void )
                         {
                             const BaseType_t xDeadlineMissed = prvTickTimeIsAfter( xConstTickCount,
                                                                                    pxRunningTCB->xAbsDeadline );
-                            const BaseType_t xWcetOverrun = ( pxRunningTCB->xJobExecTicks >= pxRunningTCB->xWcetTicks ) ? pdTRUE : pdFALSE;
+                            const BaseType_t xWcetOverrun = prvEDFHasExceededWcet( pxRunningTCB->xJobExecTicks,
+                                                                                    pxRunningTCB->xWcetTicks );
 
-                            if( ( xDeadlineMissed != pdFALSE ) ||
-                                ( xWcetOverrun != pdFALSE ) )
+                            if( xDeadlineMissed != pdFALSE )
                             {
                                 const TickType_t xNextReleaseTime = prvPeriodicTaskNextReleaseAfter( pxRunningTCB,
                                                                                                       xConstTickCount );
@@ -8196,7 +8266,7 @@ BaseType_t xTaskIncrementTick( void )
                                 #else
                                     const char * const pcMPPolicy = "global";
                                 #endif
-                                const char * const pcMPReason = ( xDeadlineMissed != pdFALSE ) ? "deadline miss" : "WCET overrun";
+                                const char * const pcMPReason = "deadline miss";
 
                                 vTraceRecordMPOverrunEvent( pcMPPolicy,
                                                             pcMPReason,
@@ -8210,10 +8280,7 @@ BaseType_t xTaskIncrementTick( void )
                                                             ( uint32_t ) pxRunningTCB->xWcetTicks,
                                                             ( uint32_t ) xNextReleaseTime );
 
-                                if( xDeadlineMissed != pdFALSE )
-                                {
-                                    traceTASK_DEADLINE_MISSED();
-                                }
+                                traceTASK_DEADLINE_MISSED_FOR_TASK( pxRunningTCB );
 
                                 prvPeriodicTaskAdvanceAndReinsert( pxRunningTCB,
                                                                    &( pxRunningTCB->xEDFTaskListItem ),
@@ -8232,6 +8299,12 @@ BaseType_t xTaskIncrementTick( void )
                                 {
                                     prvYieldCore( xEDFCoreID );
                                 }
+                            }
+                            else if( ( xWcetOverrun != pdFALSE ) &&
+                                     ( pxRunningTCB->xWcetOverrunReported == pdFALSE ) )
+                            {
+                                pxRunningTCB->xWcetOverrunReported = pdTRUE;
+                                traceTASK_WCET_OVERRUN_FOR_TASK( pxRunningTCB );
                             }
                         }
                     }
@@ -10230,6 +10303,7 @@ static void prvResetNextTaskUnblockTime( void )
         pxTCB->xAbsJobReleaseTime = xNextReleaseTime;
         pxTCB->xAbsDeadline = xNextReleaseTime + pxTCB->xRelDeadline;
         pxTCB->xJobExecTicks = ( TickType_t ) 0U;
+        pxTCB->xWcetOverrunReported = pdFALSE;
 
         ( void ) uxListRemove( pxTaskListItem );
         listSET_LIST_ITEM_VALUE( pxTaskListItem, pxTCB->xAbsJobReleaseTime );

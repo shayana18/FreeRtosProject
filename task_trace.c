@@ -14,9 +14,74 @@
 #endif
 
 #define TRACE_DEADLINE_MISS_HOLD_TICKS    ( ( configTICK_RATE_HZ > 0u ) ? configTICK_RATE_HZ : 1u )
+#define TRACE_DEADLINE_MISS_EVENT_CAPACITY 8u
+#define TRACE_WCET_OVERRUN_EVENT_CAPACITY 8u
 #define TRACE_MP_OVERRUN_EVENT_CAPACITY   8u
 
 static volatile uint32_t ulDeadlineMissHoldTicks = 0u;
+
+typedef struct xTRACE_DEADLINE_MISS_EVENT
+{
+    BaseType_t xValid;
+    uint32_t ulTaskId;
+} TraceDeadlineMissEvent_t;
+
+typedef struct xTRACE_WCET_OVERRUN_EVENT
+{
+    BaseType_t xValid;
+    uint32_t ulTaskId;
+} TraceWcetOverrunEvent_t;
+
+static TraceDeadlineMissEvent_t xDeadlineMissEvents[ TRACE_DEADLINE_MISS_EVENT_CAPACITY ];
+static volatile UBaseType_t uxDeadlineMissWriteIndex = 0u;
+static volatile uint32_t ulDeadlineMissDroppedEvents = 0u;
+static TraceWcetOverrunEvent_t xWcetOverrunEvents[ TRACE_WCET_OVERRUN_EVENT_CAPACITY ];
+static volatile UBaseType_t uxWcetOverrunWriteIndex = 0u;
+static volatile uint32_t ulWcetOverrunDroppedEvents = 0u;
+
+static void prvTraceQueueDeadlineMissEvent( uint32_t ulTaskId )
+{
+    UBaseType_t uxSavedInterruptStatus;
+    UBaseType_t uxSlot;
+
+    uxSavedInterruptStatus = taskENTER_CRITICAL_FROM_ISR();
+    {
+        uxSlot = uxDeadlineMissWriteIndex;
+        uxDeadlineMissWriteIndex = ( UBaseType_t ) ( ( uxDeadlineMissWriteIndex + 1u ) %
+                                                    TRACE_DEADLINE_MISS_EVENT_CAPACITY );
+
+        if( xDeadlineMissEvents[ uxSlot ].xValid != pdFALSE )
+        {
+            ulDeadlineMissDroppedEvents++;
+        }
+
+        xDeadlineMissEvents[ uxSlot ].ulTaskId = ulTaskId;
+        xDeadlineMissEvents[ uxSlot ].xValid = pdTRUE;
+    }
+    taskEXIT_CRITICAL_FROM_ISR( uxSavedInterruptStatus );
+}
+
+static void prvTraceQueueWcetOverrunEvent( uint32_t ulTaskId )
+{
+    UBaseType_t uxSavedInterruptStatus;
+    UBaseType_t uxSlot;
+
+    uxSavedInterruptStatus = taskENTER_CRITICAL_FROM_ISR();
+    {
+        uxSlot = uxWcetOverrunWriteIndex;
+        uxWcetOverrunWriteIndex = ( UBaseType_t ) ( ( uxWcetOverrunWriteIndex + 1u ) %
+                                                   TRACE_WCET_OVERRUN_EVENT_CAPACITY );
+
+        if( xWcetOverrunEvents[ uxSlot ].xValid != pdFALSE )
+        {
+            ulWcetOverrunDroppedEvents++;
+        }
+
+        xWcetOverrunEvents[ uxSlot ].ulTaskId = ulTaskId;
+        xWcetOverrunEvents[ uxSlot ].xValid = pdTRUE;
+    }
+    taskEXIT_CRITICAL_FROM_ISR( uxSavedInterruptStatus );
+}
 
 #if ( configUSE_MP == 1 ) && ( configNUMBER_OF_CORES > 1 )
 typedef struct xTRACE_MP_OVERRUN_EVENT
@@ -263,6 +328,124 @@ void vTraceDeadlineMissTick( void )
     }
 }
 
+void vTraceRecordDeadlineMiss( uint32_t ulTaskId )
+{
+    if( __get_current_exception() != 0u )
+    {
+        prvTraceQueueDeadlineMissEvent( ulTaskId );
+    }
+    else
+    {
+        vTraceUsbPrint( "Deadline miss: task id=%lu\r\n", ( unsigned long ) ulTaskId );
+    }
+}
+
+void vTraceFlushDeadlineMissEvents( void )
+{
+    UBaseType_t uxIndex;
+    uint32_t ulDroppedEvents;
+
+    if( __get_current_exception() != 0u )
+    {
+        return;
+    }
+
+    taskENTER_CRITICAL();
+    {
+        ulDroppedEvents = ulDeadlineMissDroppedEvents;
+        ulDeadlineMissDroppedEvents = 0u;
+    }
+    taskEXIT_CRITICAL();
+
+    if( ulDroppedEvents != 0u )
+    {
+        vTraceUsbPrint( "[deadline miss] dropped %lu deferred trace events\r\n",
+                        ( unsigned long ) ulDroppedEvents );
+    }
+
+    for( uxIndex = 0u; uxIndex < TRACE_DEADLINE_MISS_EVENT_CAPACITY; uxIndex++ )
+    {
+        TraceDeadlineMissEvent_t xEvent;
+        BaseType_t xHasEvent = pdFALSE;
+
+        taskENTER_CRITICAL();
+        {
+            if( xDeadlineMissEvents[ uxIndex ].xValid != pdFALSE )
+            {
+                xEvent = xDeadlineMissEvents[ uxIndex ];
+                xDeadlineMissEvents[ uxIndex ].xValid = pdFALSE;
+                xHasEvent = pdTRUE;
+            }
+        }
+        taskEXIT_CRITICAL();
+
+        if( xHasEvent != pdFALSE )
+        {
+            vTraceUsbPrint( "Deadline miss: task id=%lu\r\n",
+                            ( unsigned long ) xEvent.ulTaskId );
+        }
+    }
+}
+
+void vApplicationWcetOverrunHook( uint32_t ulTaskId )
+{
+    if( __get_current_exception() != 0u )
+    {
+        prvTraceQueueWcetOverrunEvent( ulTaskId );
+    }
+    else
+    {
+        vTraceUsbPrint( "WCET overrun: task id=%lu\r\n", ( unsigned long ) ulTaskId );
+    }
+}
+
+void vTraceFlushWcetOverrunEvents( void )
+{
+    UBaseType_t uxIndex;
+    uint32_t ulDroppedEvents;
+
+    if( __get_current_exception() != 0u )
+    {
+        return;
+    }
+
+    taskENTER_CRITICAL();
+    {
+        ulDroppedEvents = ulWcetOverrunDroppedEvents;
+        ulWcetOverrunDroppedEvents = 0u;
+    }
+    taskEXIT_CRITICAL();
+
+    if( ulDroppedEvents != 0u )
+    {
+        vTraceUsbPrint( "[WCET] dropped %lu deferred overrun trace events\r\n",
+                        ( unsigned long ) ulDroppedEvents );
+    }
+
+    for( uxIndex = 0u; uxIndex < TRACE_WCET_OVERRUN_EVENT_CAPACITY; uxIndex++ )
+    {
+        TraceWcetOverrunEvent_t xEvent;
+        BaseType_t xHasEvent = pdFALSE;
+
+        taskENTER_CRITICAL();
+        {
+            if( xWcetOverrunEvents[ uxIndex ].xValid != pdFALSE )
+            {
+                xEvent = xWcetOverrunEvents[ uxIndex ];
+                xWcetOverrunEvents[ uxIndex ].xValid = pdFALSE;
+                xHasEvent = pdTRUE;
+            }
+        }
+        taskEXIT_CRITICAL();
+
+        if( xHasEvent != pdFALSE )
+        {
+            vTraceUsbPrint( "WCET overrun: task id=%lu\r\n",
+                            ( unsigned long ) xEvent.ulTaskId );
+        }
+    }
+}
+
 #if ( configUSE_MP == 1 ) && ( configNUMBER_OF_CORES > 1 )
 void vTraceRecordMPOverrunEvent( const char * pcPolicy,
                                  const char * pcReason,
@@ -356,5 +539,7 @@ void vTraceFlushMPOverrunEvents( void )
                             ( unsigned long ) xEvent.ulNextReleaseTick );
         }
     }
+
+    vTraceFlushWcetOverrunEvents();
 }
 #endif

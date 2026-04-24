@@ -15,34 +15,60 @@
 #include "test_utils.h"
 
 /*
- * CBS rejection tests:
- * - server admission rejects a reservation that would push total CBS bandwidth
- *   above 100%.
- * - one worker cannot accept a second outstanding job before completing the
- *   first one.
+ * CBS Test 5:
+ * - One normal periodic EDF task intentionally exceeds both WCET and deadline.
+ * - One CBS server/worker pair runs short background jobs that stay within the
+ *   reserved server budget.
+ *
+ * The goal is to confirm that ordinary periodic overrun and deadline-miss
+ * handling still works correctly when CBS support is enabled.
  */
 
 #define CBS5_STACK_DEPTH                256u
 
-#define CBS5_SERVER_A_PERIOD_MS       5000u
-#define CBS5_SERVER_A_BUDGET_MS       2000u
-#define CBS5_SERVER_B_PERIOD_MS       5000u
-#define CBS5_SERVER_B_BUDGET_MS       2500u
-#define CBS5_SERVER_BAD_PERIOD_MS     5000u
-#define CBS5_SERVER_BAD_BUDGET_MS     1000u
+#define CBS5_PERIODIC_PERIOD_MS        6000u
+#define CBS5_PERIODIC_DEADLINE_MS      1800u
+#define CBS5_PERIODIC_WCET_MS           700u
+#define CBS5_PERIODIC_WORK_MS          2200u
 
-#define CBS5_CONTROLLER_PERIOD_MS    10000u
-#define CBS5_CONTROLLER_WCET_MS        250u
-#define CBS5_WORKER_WORK_MS            300u
+#define CBS5_SERVER_PERIOD_MS          5000u
+#define CBS5_SERVER_BUDGET_MS          1200u
+#define CBS5_SERVER_JOB_WORK_MS         350u
+#define CBS5_SERVER_JOB_PERIOD_MS      5000u
+#define CBS5_SERVER_JOB_OFFSET_MS      1000u
+#define CBS5_SOURCE_DEADLINE_MS         100u
 
-static CBS_Server_t * pxCBS5ServerA = NULL;
-static CBS_Server_t * pxCBS5ServerB = NULL;
-static CBS_Server_t * pxCBS5RejectedServer = NULL;
+#define CBS5_TRACE_PERIODIC              1u
+#define CBS5_TRACE_SERVER                2u
+#define CBS5_TRACE_SOURCE                4u
+
+static CBS_Server_t * pxCBS5Server = NULL;
+static TaskHandle_t xCBS5PeriodicHandle = NULL;
 static TaskHandle_t xCBS5WorkerHandle = NULL;
-static volatile uint32_t ulCBS5WorkerJobs = 0u;
-static volatile BaseType_t xCBS5AdmissionRejected = pdFALSE;
-static volatile BaseType_t xCBS5SecondJobRejected = pdFALSE;
-static volatile BaseType_t xCBS5ThirdJobAccepted = pdFALSE;
+static TaskHandle_t xCBS5SourceHandle = NULL;
+static TickType_t xCBS5AnchorTick = 0u;
+
+static volatile uint32_t ulCBS5PeriodicReleases = 0u;
+static volatile uint32_t ulCBS5ServerJobsCompleted = 0u;
+static volatile uint32_t ulCBS5ServerSubmitFailures = 0u;
+
+static void vCBS5PeriodicOverrunTask( void * pvParameters )
+{
+    TickType_t xLastWakeTime = xCBS5AnchorTick;
+
+    ( void ) pvParameters;
+
+    for( ;; )
+    {
+        ulCBS5PeriodicReleases++;
+        spin_ms( CBS5_PERIODIC_WORK_MS );
+
+        if( xTaskDelayUntil( &xLastWakeTime, pdMS_TO_TICKS( CBS5_PERIODIC_PERIOD_MS ) ) == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
+    }
+}
 
 static void vCBS5WorkerTask( void * pvParameters )
 {
@@ -52,45 +78,41 @@ static void vCBS5WorkerTask( void * pvParameters )
     {
         if( xCBSWaitForJob( portMAX_DELAY ) == pdTRUE )
         {
-            spin_ms( CBS5_WORKER_WORK_MS );
-            ulCBS5WorkerJobs++;
+            spin_ms( CBS5_SERVER_JOB_WORK_MS );
+            ulCBS5ServerJobsCompleted++;
             configASSERT( xCBSCompleteJob() == pdPASS );
+
+            vTraceFlushWcetOverrunEvents();
+            vTraceFlushDeadlineMissEvents();
         }
     }
 }
 
-static void vCBS5ControllerTask( void * pvParameters )
+static void vCBS5SourceTask( void * pvParameters )
 {
-    BaseType_t xFirstSubmit;
-    BaseType_t xSecondSubmit;
-    BaseType_t xThirdSubmit;
-    TickType_t xLastWakeTime = xTaskGetTickCount();
+    TickType_t xLastWakeTime = xCBS5AnchorTick;
 
     ( void ) pvParameters;
 
-    vTaskDelay( pdMS_TO_TICKS( 500u ) );
-
-    xFirstSubmit = xCBSSubmitJob( pxCBS5ServerA, xCBS5WorkerHandle );
-    xSecondSubmit = xCBSSubmitJob( pxCBS5ServerA, xCBS5WorkerHandle );
-
-    xCBS5SecondJobRejected =
-        ( ( xFirstSubmit == pdPASS ) && ( xSecondSubmit == pdFAIL ) ) ? pdTRUE : pdFALSE;
-    configASSERT( xCBS5SecondJobRejected == pdTRUE );
-
-    vTaskDelay( pdMS_TO_TICKS( 1000u ) );
-    xThirdSubmit = xCBSSubmitJob( pxCBS5ServerA, xCBS5WorkerHandle );
-    xCBS5ThirdJobAccepted = ( xThirdSubmit == pdPASS ) ? pdTRUE : pdFALSE;
-    configASSERT( xCBS5ThirdJobAccepted == pdTRUE );
-
-    vTraceUsbPrint( "[CBS5] admission_rejected=%ld second_job_rejected=%ld third_job_accepted=%ld completed_jobs=%lu\r\n",
-                    ( long ) xCBS5AdmissionRejected,
-                    ( long ) xCBS5SecondJobRejected,
-                    ( long ) xCBS5ThirdJobAccepted,
-                    ( unsigned long ) ulCBS5WorkerJobs );
-
     for( ;; )
     {
-        if( xTaskDelayUntil( &xLastWakeTime, pdMS_TO_TICKS( CBS5_CONTROLLER_PERIOD_MS ) ) == pdFALSE )
+        if( ( pxCBS5Server != NULL ) && ( xCBS5WorkerHandle != NULL ) )
+        {
+            if( xCBSSubmitJob( pxCBS5Server, xCBS5WorkerHandle ) == pdFAIL )
+            {
+                ulCBS5ServerSubmitFailures++;
+            }
+        }
+
+        vTraceFlushWcetOverrunEvents();
+        vTraceFlushDeadlineMissEvents();
+        vTraceUsbPrint( "[CBS5] periodic_releases=%lu server_jobs=%lu submit_failures=%lu server_deadline=%lu\r\n",
+                        ( unsigned long ) ulCBS5PeriodicReleases,
+                        ( unsigned long ) ulCBS5ServerJobsCompleted,
+                        ( unsigned long ) ulCBS5ServerSubmitFailures,
+                        ( unsigned long ) ( ( pxCBS5Server != NULL ) ? pxCBS5Server->xAbsDeadline : 0u ) );
+
+        if( xTaskDelayUntil( &xLastWakeTime, pdMS_TO_TICKS( CBS5_SERVER_JOB_PERIOD_MS ) ) == pdFALSE )
         {
             xLastWakeTime = xTaskGetTickCount();
         }
@@ -99,46 +121,54 @@ static void vCBS5ControllerTask( void * pvParameters )
 
 void cbs_5_run( void )
 {
-    TaskHandle_t xControllerHandle = NULL;
-
     stdio_init_all();
     vTraceTaskPinsInit();
 
-    pxCBS5ServerA = xCBSServerCreate( pdMS_TO_TICKS( CBS5_SERVER_A_BUDGET_MS ),
-                                      pdMS_TO_TICKS( CBS5_SERVER_A_PERIOD_MS ),
-                                      "CBS5_A" );
-    pxCBS5ServerB = xCBSServerCreate( pdMS_TO_TICKS( CBS5_SERVER_B_BUDGET_MS ),
-                                      pdMS_TO_TICKS( CBS5_SERVER_B_PERIOD_MS ),
-                                      "CBS5_B" );
-    pxCBS5RejectedServer = xCBSServerCreate( pdMS_TO_TICKS( CBS5_SERVER_BAD_BUDGET_MS ),
-                                             pdMS_TO_TICKS( CBS5_SERVER_BAD_PERIOD_MS ),
-                                             "CBS5_BAD" );
+    pxCBS5Server = NULL;
+    xCBS5PeriodicHandle = NULL;
+    xCBS5WorkerHandle = NULL;
+    xCBS5SourceHandle = NULL;
+    ulCBS5PeriodicReleases = 0u;
+    ulCBS5ServerJobsCompleted = 0u;
+    ulCBS5ServerSubmitFailures = 0u;
 
-    configASSERT( pxCBS5ServerA != NULL );
-    configASSERT( pxCBS5ServerB != NULL );
-    xCBS5AdmissionRejected = ( pxCBS5RejectedServer == NULL ) ? pdTRUE : pdFALSE;
-    configASSERT( xCBS5AdmissionRejected == pdTRUE );
+    xCBS5AnchorTick = xTaskGetTickCount();
+
+    pxCBS5Server = xCBSServerCreate( pdMS_TO_TICKS( CBS5_SERVER_BUDGET_MS ),
+                                     pdMS_TO_TICKS( CBS5_SERVER_PERIOD_MS ),
+                                     "CBS5" );
+    configASSERT( pxCBS5Server != NULL );
+
+    configASSERT( xTaskCreate( vCBS5PeriodicOverrunTask,
+                               "CBS5_PER",
+                               CBS5_STACK_DEPTH,
+                               NULL,
+                               &xCBS5PeriodicHandle,
+                               CBS5_PERIODIC_PERIOD_MS,
+                               CBS5_PERIODIC_WCET_MS,
+                               CBS5_PERIODIC_DEADLINE_MS ) == pdPASS );
 
     configASSERT( xTaskCreateCBSWorker( vCBS5WorkerTask,
-                                        "CBS5 WORK",
+                                        "CBS5_APER",
                                         CBS5_STACK_DEPTH,
                                         NULL,
                                         &xCBS5WorkerHandle,
-                                        pxCBS5ServerA ) == pdPASS );
-    configASSERT( xCBS5WorkerHandle != NULL );
+                                        pxCBS5Server ) == pdPASS );
 
-    configASSERT( xTaskCreate( vCBS5ControllerTask,
-                               "CBS5 CTRL",
+    configASSERT( xTaskCreate( vCBS5SourceTask,
+                               "CBS5_SRC",
                                CBS5_STACK_DEPTH,
                                NULL,
-                               &xControllerHandle,
-                               CBS5_CONTROLLER_PERIOD_MS,
-                               CBS5_CONTROLLER_WCET_MS,
-                               CBS5_CONTROLLER_PERIOD_MS ) == pdPASS );
-    configASSERT( xControllerHandle != NULL );
+                               &xCBS5SourceHandle,
+                               CBS5_SERVER_JOB_PERIOD_MS,
+                               50u,
+                               CBS5_SOURCE_DEADLINE_MS ) == pdPASS );
 
-    vTaskSetApplicationTaskTag( xCBS5WorkerHandle, ( TaskHookFunction_t ) 1 );
-    vTaskSetApplicationTaskTag( xControllerHandle, ( TaskHookFunction_t ) 2 );
+    vTaskSetApplicationTaskTag( xCBS5PeriodicHandle, ( TaskHookFunction_t ) CBS5_TRACE_PERIODIC );
+    vTaskSetApplicationTaskTag( xCBS5WorkerHandle, ( TaskHookFunction_t ) CBS5_TRACE_SERVER );
+    vTaskSetApplicationTaskTag( xCBS5SourceHandle, ( TaskHookFunction_t ) CBS5_TRACE_SOURCE );
+
+    vTraceUsbPrint( "[CBS5] periodic task should overrun WCET and miss its deadline; CBS worker should keep completing short jobs\r\n" );
 
     vTaskStartScheduler();
 

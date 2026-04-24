@@ -494,6 +494,8 @@ typedef enum
 #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
     BaseType_t xTaskSRPAcquireResource( UBaseType_t uxResourceType ) PRIVILEGED_FUNCTION;
     BaseType_t xTaskSRPReleaseResource( UBaseType_t uxResourceType ) PRIVILEGED_FUNCTION;
+    void vTaskSRPRegisterResourceSemaphore( UBaseType_t uxResourceType,
+                                            void * pvSemaphoreHandle ) PRIVILEGED_FUNCTION;
 #endif
 
 #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
