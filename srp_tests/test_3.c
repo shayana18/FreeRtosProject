@@ -45,6 +45,7 @@
 
 #define SRP3_TRACE_BASE                 1u
 #define SRP3_TRACE_GOOD                 2u
+#define SRP3_TRACE_BAD                  4u
 
 #define SRP3_ARRAY_LENGTH( x )    ( sizeof( x ) / sizeof( ( x )[ 0 ] ) )
 
@@ -162,6 +163,11 @@ void srp_3_run( void )
                                  xSRP3BadClaims,
                                  SRP3_ARRAY_LENGTH( xSRP3BadClaims ) );
     xSRP3BadRejected = ( xCreateResult == pdFAIL ) ? pdTRUE : pdFALSE;
+    if( xBadHandle != NULL )
+    {
+        vTaskSetApplicationTaskTag( xBadHandle, ( TaskHookFunction_t ) SRP3_TRACE_BAD );
+    }
+
     configASSERT( xSRP3BadRejected == pdTRUE );
     configASSERT( xBadHandle == NULL );
 

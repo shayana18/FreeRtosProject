@@ -99,8 +99,8 @@ Expected waveform:
 Measured waveform:
 ![Test 2 CBS Waveform](<../test_assets/CBS Tests/Test 2/Test 2 CBS Waveform.png>)
 
-Annotation
-![Test 2 CBS Description](<../test_assets/CBS Tests/Test 2/Test 2 CBS Description.jpg>)
+<!-- Task Set
+![Test 2 CBS Description](<../test_assets/CBS Tests/Test 2/Test 2 CBS Description.jpg>) -->
 
 #### Expected
 - Both periodic tasks should continue to release and complete normally.

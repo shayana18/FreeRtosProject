@@ -66,7 +66,7 @@ Measured waveform:
 #### Expected
 - At `t=0s`, all jobs are released and Task 1 (earliest absolute deadline) starts first.
 - After running for it's designated `Wcet = 1500ms`, it is followed by Task 2 and then 3 for their respective `Wcet`s.
-- At `t=10s`, J<sub>1,3 arrives arrives and has deadline of `15s` while the current running J<sub>3,2 has a deadline of `16s`. Therefore J<sub>1,3 will preempt the current running job.
+- At `t=10s`, J<sub>1,3</sub> arrives and has deadline of `15s` while the current running J<sub>3,2</sub> has a deadline of `16s`. Therefore J<sub>1,3</sub> will preempt the current running job.
 - Tasks that can run as soon as they arrive have correct period over which they are submitted again.
 - Current running task is also preempted by Task 1 at `t=15s` and `t=25s` for similar reasons. 
 
@@ -108,9 +108,10 @@ Measured waveform:
 - At `t=0s`, T1/T2/T3/T4 all release together with deadlines at `2s`, `4s`, `8s`, and `16s`, so T1 must execute first.
 - At `t=2s`, next T1 job releases; at `t=4s`, T1 and T2 jobs release; at `t=8s`, T1/T2/T3 jobs release; at `t=16s`, all four release together again.
 - In the `0s` to `16s` window, T1 should appear every `2s`, T2 every `4s`, T3 every `8s`, and T4 every `16s`, with no deadline-miss indicator pulse.
+- The tasks will execute in forming a "symmetric" pattern on the waveform due to the harmonic periods.
 
 #### Actual
--
+- As can be seen from the logic analyzer waveform, the described symmetric pattern can be observed. Note that the small pulses that can be seen intermitently is an artifact of small amounts of jitter since we are spinning in each task for it's full WCET.
 
 #### Verified
 - EDF was enabled via configuration and the kernel executed EDF periodic dispatch instead of fixed-priority dispatch.
@@ -147,16 +148,16 @@ Measured waveform:
 ![Test 3 EDF Waveform](<../test_assets/EDF Tests/Test 3/Test 3 EDF Waveform.png>)
 
 #### Expected
+- The times below describe the ideal admission-controller timeline once the controller task gets CPU time. Because the controller is configured with a very large period/deadline to avoid introducing deadline misses of its own, it has a later absolute deadline than the baseline periodic tasks. Under EDF it can therefore be preempted by those tasks, so its retry attempt and the following good-candidate create call may be delayed past the nominal `t~10s` point.
 - At startup (`t~0s`), the initial bad candidate create call should return rejection immediately.
-- Around `t=10s`, the controller task should perform a second bad-candidate create attempt, which should also be rejected.
-- Immediately after that same `t~10s` controller window, the good candidate create call should be accepted and begin periodic releases from that point onward.
+- Around `t=10s`, the controller task becomes eligible to perform a second bad-candidate create attempt, which should also be rejected.
+- Once the delayed controller window runs, the good candidate create call should be accepted and begin periodic releases from that point onward.
 - Baseline tasks should continue their periodic pattern across `0s-10s` and after `10s`, showing runtime task creation does not stall scheduler progress.
 
 #### Actual
--
-- Initial bad admission return:
-- Delayed bad admission return:
-- Delayed good admission return:
+- Initial bad admission return: We can see the bad candidate was unable to be created  at startup since we do not see a task id on the waveform that corresponds to the bad candidate.
+- Delayed bad admission return: Though the timing is a bit skewed to to previously mentioned limitations, it can be seen from the waveform that the bad candidate was not able to be created at `t=15s` since there is no corresponding task id on the trace pins after that time.
+- Delayed good admission return: We can see that the good candidate was created at around `t=15s` since we see the corresponding task id on the trace pins from that point onward. 
 
 #### Verified
 - Admission control rejected unschedulable additions and accepted schedulable additions in the same test scenario.
@@ -195,9 +196,10 @@ Measured waveform:
 - At `t=5s`, T1 releases again (deadline `8s`), and at `t=7s`, T2 releases again (deadline `10.5s`); trace ordering should reflect deadline-based arbitration, not just period size.
 - At `t=10s`, T1 and T3 both release; T1's earlier deadline (`13s`) should place it ahead of T3 (`18s`) when both contend.
 - No deadline-miss pulse is expected over the observed schedule window.
+- At `t=14s` T2 releases again and starts executing. `t=15s`, T1 release again while T2 is not finished executing; T1's deadline (`18s`) should place it after deadline of T2 (`17.5s`). So based on this, T1 should not preempt T2 at `t=15s` and should only start executing after T2 finishes at around `t=17.5s`.
 
 #### Actual
--
+- We can see from the waveform that as described in what was expected, T1 does not preempt T2 at `t=15s` and only starts executing after T2 finishes at around `t=17.5s`. This shows that the scheduler is correctly prioritizing based on absolute deadlines rather than just periods.
 
 #### Verified
 - Constrained-deadline EDF ordering (`D != T`) was exercised and matched absolute-deadline-driven dispatch.
@@ -236,10 +238,10 @@ Measured waveform:
 - At `t=0s`, all tasks release with deadlines `3s`, `5s`, `7s`, and `10s`; initial order should prioritize T1 then T2 before later-deadline jobs.
 - Around `t=4s`, a new T1 job arrives (deadline `7s`) while longer jobs are active, so an earlier-deadline takeover/preemption is expected.
 - Around `t=6s` and `t=8s`, additional T2/T1 releases create repeated reorder points; trace should show deadline-based re-selection at these boundaries.
-- No repeated deadline-miss pulse pattern is expected for this configured test load.
+- At `t=18s`T3 releases again with deadline `25s`, however it cannot execute until T2 finishes at around `t=19s`. T3 is expected ot run until `t=20s` when T1 is released with deadline `23s` and preempts T3. T1 should then run until it finishes at around `t=22s` and then T3 should resume and finish at around `t=25s`.
 
 #### Actual
--
+- As can be seen from the waaveform, T3 releases at `t=18s` but cannot execute until T2 finishes at around `t=19s`. T3 then runs until `t=20s` when T1 is released with deadline `23s` and preempts T3. T1 then runs until it finishes at around `t=22s` and then T3 resumes and finishes at around `t=25s`. This shows that the scheduler is correctly handling the complex interplay of releases, deadlines, and preemptions in this higher-utilization constrained-deadline scenario.
 
 #### Verified
 - Constrained-deadline EDF remained stable under higher utilization with expected reorder/preemption behavior.
@@ -320,9 +322,8 @@ Measured waveform:
 - After scheduler starts, only baseline + accepted-good tasks should run; the rejected bad candidate should never appear on trace pins.
 
 #### Actual
--
-- Bad admission return:
-- Good admission return:
+- Bad admission return: We can see that the bad candidate was not able to be created at startup since there is no task id on the trace pins that corresponds to the bad candidate. This shows that the bad candidate was correctly rejected by the implicit-deadline utilization-based admission control logic.
+- Good admission return: We can see that the good candidate was created at startup since we see the corresponding task id on the trace pins from the beginning of the run. This shows that the good candidate was correctly accepted by the implicit-deadline utilization-based admission control logic.
 
 #### Verified
 - Utilization-path admission control for implicit deadlines (`D = T`) behaved as expected (reject then accept).
@@ -370,8 +371,7 @@ Measured waveform:
 - Deadline-miss indicator should pulse around those windows, and normal dispatch should resume afterward.
 
 #### Actual
--
-- Deadline miss count observed:
+- Deadline miss count observed: Two observed at the expected times, note that a deadline miss pulse lasts for 1.00s so if multiple misses occur in quick succession, the pulses may visually merge into a longer pulse. We can confirm with measurement that each pulse is exactly 1.00s long, which indicates that they are individual misses rather than a single miss event with an extended pulse.
 
 #### Verified
 - WCET-overrun reporting and deadline-miss handling were both exercised by intentional long-running jobs without collapsing scheduler progress.
@@ -411,8 +411,7 @@ Measured waveform:
 - Around `t=11s`, the second cycle begins and should show the same ordering trend with no sustained lockup or starvation signature.
 
 #### Actual
--
-- Deadline miss count observed:
+- All 100 tasks were observed in the logic analyzer trace with the expected ordering pattern (Task 1 before Task 2 before Task 3, etc.). This was also shown during demo for multiple cycles.
 
 #### Verified
 - Roughly 100 periodic EDF tasks were instantiated and scheduled in a single stress scenario.
