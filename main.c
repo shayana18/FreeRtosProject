@@ -43,7 +43,6 @@
             #include "mp_tests/global_edf_tests/test_2.h"
             #include "mp_tests/global_edf_tests/test_3.h"
             #include "mp_tests/global_edf_tests/test_4.h"
-            #include "mp_tests/global_edf_tests/test_5.h"
         #else
             #include "mp_tests/partitioned_edf_tests/test_1.h"
             #include "mp_tests/partitioned_edf_tests/test_2.h"
@@ -168,10 +167,6 @@ int main( void )
 
             // Global EDF MP Deadline-overrun plus deadline-miss UART trace test.
             // mp_global_edf_4_run();
-
-            // Global EDF affinity enforcement: pinned tasks must stay on their assigned core
-            // while unrestricted tasks migrate freely. Hyperperiod 12 s.
-            // mp_global_edf_5_run();
 
             // mp_compare_glob_run();
             mp_test_dhall_run();
