@@ -236,6 +236,19 @@ typedef enum
      * puxPerTaskBytes receives the bytes that per-task allocation would use. */
     void vTaskGetSRPSharedStackUsage( size_t * puxSharedBytes,
                                       size_t * puxPerTaskBytes );
+
+    #if ( configUSE_SRP_SHARED_STACKS == 1 )
+        /* Reports SRP stack usage stats in bytes.
+         * current_* are live observed usage estimates,
+         * max_* are max observed values since boot,
+         * theoretical_* are static limits derived from configured task/region depths. */
+        void vTaskGetSRPStackUsageRuntimeStats( size_t * puxCurrentSharedBytes,
+                                                size_t * puxCurrentNonSharedBytes,
+                                                size_t * puxMaxSharedBytes,
+                                                size_t * puxMaxNonSharedBytes,
+                                                size_t * puxTheoreticalSharedBytes,
+                                                size_t * puxTheoreticalNonSharedBytes );
+    #endif
 #endif
 
 /**
@@ -481,6 +494,8 @@ typedef enum
 #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
     BaseType_t xTaskSRPAcquireResource( UBaseType_t uxResourceType ) PRIVILEGED_FUNCTION;
     BaseType_t xTaskSRPReleaseResource( UBaseType_t uxResourceType ) PRIVILEGED_FUNCTION;
+    void vTaskSRPRegisterResourceSemaphore( UBaseType_t uxResourceType,
+                                            void * pvSemaphoreHandle ) PRIVILEGED_FUNCTION;
 #endif
 
 #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )

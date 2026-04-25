@@ -1,4 +1,4 @@
-#include "mp_tests/demo_tests/test_1_part.h"
+#include "mp_tests/test_compare_part.h"
 
 #if ( ( configUSE_MP == 1 ) && ( configUSE_UP == 0 ) && ( configUSE_EDF == 1 ) && ( PARTITIONED_EDF_ENABLE == 1U ) )
 
@@ -73,7 +73,7 @@ static void vMPDemoPart1Task( void * pvParameters )
     }
 }
 
-void mp_demo_test_1_part_run( void )
+void mp_compare_part_run( void )
 {
     static const MPDemoPartTaskConfig_t xTaskCfgs[] =
     {

@@ -14,50 +14,89 @@
 #include "test_utils.h"
 #include "task_trace.h"
 
-/* Large timing scales for easier timeline tracing in debugger/logic analyzer. */
-#define CBS3_SERVER_PERIOD_MS            8000u
-#define CBS3_SERVER_BUDGET_MS            1000u
-#define CBS3_INITIAL_ARRIVAL_OFFSET_MS   3500u
-#define CBS3_FREQUENT_ARRIVAL_MS          200u
+/* Larger scales for easier tracing. */
+#define CBS3_SERVER_PERIOD_MS            7000u
+#define CBS3_SERVER_BUDGET_MS            2200u
+#define CBS3_PERIODIC_PERIOD_MS          7000u
+#define CBS3_PERIODIC_WORK_MS            1200u
+#define CBS3_APERIODIC_WORK_MS            900u
+#define CBS3_TIE_TASK_REL_DEADLINE_MS     100u
 
-#define CBS3_WORK_SPARSE_MS               250u
-#define CBS3_WORK_FREQUENT_MS            1200u
-
-#define CBS3_PERIODIC_PERIOD_MS          6000u
-#define CBS3_PERIODIC_WORK_MS            2200u
+/* Observation window after tie-trigger submission. */
+#define CBS3_TIE_OBSERVE_MS               120u
 
 #define CBS3_PERIODIC_STACK_WORDS         256u
 #define CBS3_WORKER_STACK_WORDS           256u
-#define CBS3_ARRIVAL_STACK_WORDS          192u
+#define CBS3_ARRIVAL_STACK_WORDS          220u
+
+#define CBS3_WINNER_NONE                    0u
+#define CBS3_WINNER_PERIODIC                1u
+#define CBS3_WINNER_CBS                     2u
 
 static volatile uint32_t ulCBS3PeriodicBeats;
 static volatile uint32_t ulCBS3AperiodicJobsDone;
 static volatile uint32_t ulCBS3SubmitFailures;
 
-/* Debug/verification probes for deadline behavior. */
-static volatile TickType_t xCBS3ServerCreateTick;
-static volatile TickType_t xCBS3SparseArrivalTick;
-static volatile TickType_t xCBS3DeadlineAfterSparseSubmit;
-static volatile TickType_t xCBS3DeadlineAfterExhaustion;
-static volatile BaseType_t xCBS3ObservedExhaustionPush;
+static volatile TickType_t xCBS3PeriodicAnchorTick;
+static volatile BaseType_t xCBS3TieWindowOpen;
+static volatile uint32_t ulCBS3TieWinner;
+static volatile uint32_t ulCBS3TieAttempts;
+static volatile uint32_t ulCBS3TieCBSWins;
 
 static TaskHandle_t xCBS3PeriodicHandle;
 static TaskHandle_t xCBS3WorkerHandle;
-static TaskHandle_t xCBS3ArrivalHandle;
+static TaskHandle_t xCBS3TieArrivalHandle;
 static CBS_Server_t * pxCBS3Server;
+
+static BaseType_t prvCBS3TrySubmit( void )
+{
+    if( ( pxCBS3Server != NULL ) && ( xCBS3WorkerHandle != NULL ) )
+    {
+        if( xCBSSubmitJob( pxCBS3Server, xCBS3WorkerHandle ) == pdPASS )
+        {
+            return pdPASS;
+        }
+
+        ulCBS3SubmitFailures++;
+    }
+
+    return pdFAIL;
+}
 
 static void vCBS3PeriodicTask( void * pvParameters )
 {
     TickType_t xLastWake;
+    TickType_t xPeriodicReleaseCount = ( TickType_t ) 0U;
 
     ( void ) pvParameters;
     xLastWake = xTaskGetTickCount();
 
+    if( xCBS3PeriodicAnchorTick == ( TickType_t ) 0U )
+    {
+        xCBS3PeriodicAnchorTick = xLastWake;
+
+        if( xCBS3TieArrivalHandle != NULL )
+        {
+            ( void ) xTaskNotifyGive( xCBS3TieArrivalHandle );
+        }
+    }
+
     for( ;; )
     {
+        if( ( xCBS3TieWindowOpen != pdFALSE ) && ( ulCBS3TieWinner == CBS3_WINNER_NONE ) )
+        {
+            ulCBS3TieWinner = CBS3_WINNER_PERIODIC;
+        }
+
         spin_ms( CBS3_PERIODIC_WORK_MS );
         ulCBS3PeriodicBeats++;
         ( void ) xTaskDelayUntil( &xLastWake, pdMS_TO_TICKS( CBS3_PERIODIC_PERIOD_MS ) );
+        xPeriodicReleaseCount++;
+
+        vTraceUsbPrint( "CBS3_PER deadline update: release=%lu now=%lu next_deadline~=%lu\r\n",
+                        ( unsigned long ) xPeriodicReleaseCount,
+                        ( unsigned long ) xTaskGetTickCount(),
+                        ( unsigned long ) ( xLastWake + pdMS_TO_TICKS( CBS3_PERIODIC_PERIOD_MS ) ) );
     }
 }
 
@@ -69,70 +108,54 @@ static void vCBS3WorkerTask( void * pvParameters )
     {
         if( xCBSWaitForJob( portMAX_DELAY ) == pdTRUE )
         {
-            if( ulCBS3AperiodicJobsDone == 0u )
+            if( ( xCBS3TieWindowOpen != pdFALSE ) && ( ulCBS3TieWinner == CBS3_WINNER_NONE ) )
             {
-                /* First sparse job intentionally leaves most budget unused. */
-                spin_ms( CBS3_WORK_SPARSE_MS );
-            }
-            else
-            {
-                /* Frequent phase intentionally overruns the remaining budget. */
-                spin_ms( CBS3_WORK_FREQUENT_MS );
+                ulCBS3TieWinner = CBS3_WINNER_CBS;
             }
 
+            spin_ms( CBS3_APERIODIC_WORK_MS );
             ulCBS3AperiodicJobsDone++;
             ( void ) xCBSCompleteJob();
         }
     }
 }
 
-static void vCBS3ArrivalTask( void * pvParameters )
+static void vCBS3TieArrivalTask( void * pvParameters )
 {
     TickType_t xLastWake;
-    TickType_t xPrevDeadline;
-    const TickType_t xPeriodTicks = pdMS_TO_TICKS( CBS3_SERVER_PERIOD_MS );
+    TickType_t xTieReleaseCount = ( TickType_t ) 0U;
 
     ( void ) pvParameters;
 
-    /* Sparse start: trigger the idle-arrival CBS reset path (deadline = arrival + T). */
-    vTaskDelay( pdMS_TO_TICKS( CBS3_INITIAL_ARRIVAL_OFFSET_MS ) );
+    /* Wait until the periodic task sets the common release anchor. */
+    ( void ) ulTaskNotifyTake( pdTRUE, portMAX_DELAY );
 
-    xCBS3SparseArrivalTick = xTaskGetTickCount();
-
-    configASSERT( pxCBS3Server != NULL );
-    configASSERT( xCBS3WorkerHandle != NULL );
-
-    configASSERT( xCBSSubmitJob( pxCBS3Server, xCBS3WorkerHandle ) == pdPASS );
-
-    xCBS3DeadlineAfterSparseSubmit = pxCBS3Server->xAbsDeadline;
-
-    /* Must match the idle-arrival CBS reset rule exactly. */
-    configASSERT( xCBS3DeadlineAfterSparseSubmit == ( xCBS3SparseArrivalTick + xPeriodTicks ) );
-
-    /* The sparse arrival offset is chosen so this is not an aligned period multiple
-     * from creation tick, making the reset effect obvious in traces. */
-    configASSERT( ( ( xCBS3DeadlineAfterSparseSubmit - xCBS3ServerCreateTick ) % xPeriodTicks ) != 0u );
-
-    xLastWake = xTaskGetTickCount();
-    xPrevDeadline = xCBS3DeadlineAfterSparseSubmit;
+    /* Lock tie arrivals to the same period anchor as the periodic task so the
+     * first arrival and subsequent arrivals share release/deadline phase. */
+    xLastWake = xCBS3PeriodicAnchorTick;
 
     for( ;; )
     {
-        ( void ) xTaskDelayUntil( &xLastWake, pdMS_TO_TICKS( CBS3_FREQUENT_ARRIVAL_MS ) );
+        ( void ) xTaskDelayUntil( &xLastWake, pdMS_TO_TICKS( CBS3_SERVER_PERIOD_MS ) );
+        ulCBS3TieAttempts++;
 
-        if( xCBSSubmitJob( pxCBS3Server, xCBS3WorkerHandle ) == pdFAIL )
-        {
-            ulCBS3SubmitFailures++;
-        }
+        ulCBS3TieWinner = CBS3_WINNER_NONE;
+        xCBS3TieWindowOpen = pdTRUE;
 
-        /* Detect the tick-driven budget exhaustion push: deadline = previous deadline + T. */
-        if( ( xCBS3ObservedExhaustionPush == pdFALSE ) &&
-            ( pxCBS3Server->xAbsDeadline != xPrevDeadline ) )
-        {
-            xCBS3DeadlineAfterExhaustion = pxCBS3Server->xAbsDeadline;
-            configASSERT( xCBS3DeadlineAfterExhaustion == ( xPrevDeadline + xPeriodTicks ) );
-            xCBS3ObservedExhaustionPush = pdTRUE;
-        }
+        configASSERT( prvCBS3TrySubmit() == pdPASS );
+        xTieReleaseCount++;
+        vTraceUsbPrint( "CBS3_TIE deadline update: release=%lu now=%lu next_deadline~=%lu\r\n",
+                ( unsigned long ) xTieReleaseCount,
+                ( unsigned long ) xTaskGetTickCount(),
+                ( unsigned long ) ( xLastWake + pdMS_TO_TICKS( CBS3_SERVER_PERIOD_MS ) ) );
+
+        vTaskDelay( pdMS_TO_TICKS( CBS3_TIE_OBSERVE_MS ) );
+
+        /* At equal deadlines, CBS must win tie-break over periodic EDF tasks. */
+        configASSERT( ulCBS3TieWinner == CBS3_WINNER_CBS );
+        ulCBS3TieCBSWins++;
+
+        xCBS3TieWindowOpen = pdFALSE;
     }
 }
 
@@ -142,17 +165,17 @@ void cbs_3_run( void )
 
     xCBS3PeriodicHandle = NULL;
     xCBS3WorkerHandle = NULL;
-    xCBS3ArrivalHandle = NULL;
+    xCBS3TieArrivalHandle = NULL;
     pxCBS3Server = NULL;
 
     ulCBS3PeriodicBeats = 0u;
     ulCBS3AperiodicJobsDone = 0u;
     ulCBS3SubmitFailures = 0u;
-    xCBS3ServerCreateTick = 0u;
-    xCBS3SparseArrivalTick = 0u;
-    xCBS3DeadlineAfterSparseSubmit = 0u;
-    xCBS3DeadlineAfterExhaustion = 0u;
-    xCBS3ObservedExhaustionPush = pdFALSE;
+    xCBS3PeriodicAnchorTick = 0u;
+    xCBS3TieWindowOpen = pdFALSE;
+    ulCBS3TieWinner = CBS3_WINNER_NONE;
+    ulCBS3TieAttempts = 0u;
+    ulCBS3TieCBSWins = 0u;
 
     stdio_init_all();
     vTraceTaskPinsInit();
@@ -161,10 +184,6 @@ void cbs_3_run( void )
                                      pdMS_TO_TICKS( CBS3_SERVER_PERIOD_MS ),
                                      "CBS3" );
     configASSERT( pxCBS3Server != NULL );
-    configASSERT( pxCBS3Server->xPeriodTicks == pdMS_TO_TICKS( CBS3_SERVER_PERIOD_MS ) );
-    configASSERT( pxCBS3Server->xCapacityTicks == pdMS_TO_TICKS( CBS3_SERVER_BUDGET_MS ) );
-
-    xCBS3ServerCreateTick = xTaskGetTickCount();
 
     xCreateResult = xTaskCreate( vCBS3PeriodicTask,
                                  "CBS3_PER",
@@ -175,7 +194,6 @@ void cbs_3_run( void )
                                  CBS3_PERIODIC_WORK_MS,
                                  CBS3_PERIODIC_PERIOD_MS );
     configASSERT( xCreateResult == pdPASS );
-    configASSERT( xCBS3PeriodicHandle != NULL );
 
     xCreateResult = xTaskCreateCBSWorker( vCBS3WorkerTask,
                                           "CBS3_APER",
@@ -184,21 +202,31 @@ void cbs_3_run( void )
                                           &xCBS3WorkerHandle,
                                           pxCBS3Server );
     configASSERT( xCreateResult == pdPASS );
-    configASSERT( xCBS3WorkerHandle != NULL );
 
-    xCreateResult = xTaskCreate( vCBS3ArrivalTask,
-                                 "CBS3_SRC",
+    xCreateResult = xTaskCreate( vCBS3TieArrivalTask,
+                                 "CBS3_TIE",
                                  CBS3_ARRIVAL_STACK_WORDS,
                                  NULL,
-                                 &xCBS3ArrivalHandle,
-                                 CBS3_FREQUENT_ARRIVAL_MS,
+                                 &xCBS3TieArrivalHandle,
+                                 CBS3_SERVER_PERIOD_MS,
                                  20u,
-                                 CBS3_FREQUENT_ARRIVAL_MS );
+                                 CBS3_TIE_TASK_REL_DEADLINE_MS );
     configASSERT( xCreateResult == pdPASS );
-    configASSERT( xCBS3ArrivalHandle != NULL );
 
-    vTaskSetApplicationTaskTag( xCBS3PeriodicHandle, ( TaskHookFunction_t ) 1 );
-    vTaskSetApplicationTaskTag( xCBS3WorkerHandle, ( TaskHookFunction_t ) 2 );
+    if( xCBS3PeriodicHandle != NULL )
+    {
+        vTaskSetApplicationTaskTag( xCBS3PeriodicHandle, ( TaskHookFunction_t ) 1 );
+    }
+
+    if( xCBS3WorkerHandle != NULL )
+    {
+        vTaskSetApplicationTaskTag( xCBS3WorkerHandle, ( TaskHookFunction_t ) 2 );
+    }
+
+    if( xCBS3TieArrivalHandle != NULL )
+    {
+        vTaskSetApplicationTaskTag( xCBS3TieArrivalHandle, ( TaskHookFunction_t ) 4 );
+    }
 
     vTaskStartScheduler();
 

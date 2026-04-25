@@ -1902,6 +1902,7 @@ BaseType_t xQueueSemaphoreTakeSRP( QueueHandle_t xQueue,
         {
             if( xQueueSemaphoreTake( pxQueue, ( TickType_t ) 0U ) == pdPASS )
             {
+                vTaskSRPRegisterResourceSemaphore( uxResourceType, pxQueue );
                 xReturn = pdPASS;
             }
             else
@@ -1911,6 +1912,37 @@ BaseType_t xQueueSemaphoreTakeSRP( QueueHandle_t xQueue,
         }
     }
     ( void ) xTaskResumeAll();
+
+    return xReturn;
+}
+
+/*-----------------------------------------------------------*/
+
+BaseType_t xQueueSemaphoreForceGiveSRP( QueueHandle_t xQueue )
+{
+    Queue_t * const pxQueue = xQueue;
+    BaseType_t xReturn = errQUEUE_FULL;
+
+    configASSERT( pxQueue != NULL );
+
+    if( ( pxQueue == NULL ) ||
+        ( pxQueue->uxItemSize != queueSEMAPHORE_QUEUE_ITEM_LENGTH ) ||
+        ( pxQueue->uxLength != ( UBaseType_t ) 1U ) ||
+        ( pxQueue->uxQueueType == queueQUEUE_IS_MUTEX ) )
+    {
+        return errQUEUE_FULL;
+    }
+
+    taskENTER_CRITICAL();
+    {
+        if( pxQueue->uxMessagesWaiting == ( UBaseType_t ) 0U )
+        {
+            pxQueue->uxMessagesWaiting = ( UBaseType_t ) 1U;
+        }
+
+        xReturn = pdPASS;
+    }
+    taskEXIT_CRITICAL();
 
     return xReturn;
 }

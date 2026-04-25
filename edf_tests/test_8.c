@@ -36,13 +36,13 @@
 #define T5_WCET_MS                      650u
 #define T5_DEADLINE_MS                  T5_PERIOD_MS
 
-#define T6_PERIOD_MS                    9000u
-#define T6_WCET_MS                      900u
-#define T6_DEADLINE_MS                  2200u
+#define T6_PERIOD_MS                    4000u
+#define T6_WCET_MS                      700u
+#define T6_DEADLINE_MS                  1800u
 
-#define T7_PERIOD_MS                    12000u
-#define T7_WCET_MS                      1200u
-#define T7_DEADLINE_MS                  2500u
+#define T7_PERIOD_MS                    6000u
+#define T7_WCET_MS                      900u
+#define T7_DEADLINE_MS                  2200u
 
 typedef struct Test8TaskConfig
 {
@@ -51,8 +51,6 @@ typedef struct Test8TaskConfig
     uint32_t ulPeriodMs;
     uint32_t ulWcetMs;
     uint32_t ulDeadlineMs;
-    uint32_t ulLoopSliceMs;
-    UBaseType_t uxLoopCount;
 } Test8TaskConfig_t;
 
 typedef struct Test8PeriodicMissTaskConfig
@@ -64,19 +62,20 @@ typedef struct Test8PeriodicMissTaskConfig
 
 static Test8TaskConfig_t xAlwaysMeetTaskConfigs[] =
 {
-    /* Always-meet tasks: bounded loop work stays below WCET. */
-    { "Test8 T1", 1u, T1_PERIOD_MS, T1_WCET_MS, T1_DEADLINE_MS, 60u, 3u },
-    { "Test8 T2", 2u, T2_PERIOD_MS, T2_WCET_MS, T2_DEADLINE_MS, 70u, 3u },
-    { "Test8 T3", 3u, T3_PERIOD_MS, T3_WCET_MS, T3_DEADLINE_MS, 80u, 4u },
-    { "Test8 T4", 4u, T4_PERIOD_MS, T4_WCET_MS, T4_DEADLINE_MS, 90u, 4u },
-    { "Test8 T5", 5u, T5_PERIOD_MS, T5_WCET_MS, T5_DEADLINE_MS, 100u, 4u }
+    /* Always-meet tasks: each job executes for exactly its configured WCET. */
+    { "Test8 T1", 1u, T1_PERIOD_MS, T1_WCET_MS, T1_DEADLINE_MS },
+    { "Test8 T2", 2u, T2_PERIOD_MS, T2_WCET_MS, T2_DEADLINE_MS },
+    { "Test8 T3", 3u, T3_PERIOD_MS, T3_WCET_MS, T3_DEADLINE_MS },
+    { "Test8 T4", 4u, T4_PERIOD_MS, T4_WCET_MS, T4_DEADLINE_MS },
+    { "Test8 T5", 5u, T5_PERIOD_MS, T5_WCET_MS, T5_DEADLINE_MS }
 };
 
 static Test8PeriodicMissTaskConfig_t xPeriodicMissTaskConfigs[] =
 {
-    /* Periodic-miss tasks: every N jobs they delay past deadline once each period. */
-    { { "Test8 T6", 6u, T6_PERIOD_MS, T6_WCET_MS, T6_DEADLINE_MS, 120u, 4u }, 4u, 200u },
-    { { "Test8 T7", 7u, T7_PERIOD_MS, T7_WCET_MS, T7_DEADLINE_MS, 140u, 4u }, 3u, 200u }
+    /* Periodic-miss tasks: the second job misses so the first visible misses
+     * happen early in the run, around 4 s for T6 and 6 s for T7. */
+    { { "Test8 T6", 6u, T6_PERIOD_MS, T6_WCET_MS, T6_DEADLINE_MS }, 2u, 300u },
+    { { "Test8 T7", 7u, T7_PERIOD_MS, T7_WCET_MS, T7_DEADLINE_MS }, 2u, 300u }
 };
 
 static TickType_t xEdf8SharedAnchorTick = 0u;
@@ -93,13 +92,7 @@ static void vTest8AlwaysMeetTask( void * pvParameters )
 
     for( ;; )
     {
-        UBaseType_t uxLoop;
-
-        /* Bounded inner-loop work that stays within configured WCET budget. */
-        for( uxLoop = 0u; uxLoop < pxCfg->uxLoopCount; uxLoop++ )
-        {
-            spin_ms( pxCfg->ulLoopSliceMs );
-        }
+        spin_ms( pxCfg->ulWcetMs );
 
         /* Normal EDF job completion path: explicitly release at next period. */
         ( void ) xTaskDelayUntil( &xLastWakeTime, xPeriodTicks );
@@ -119,7 +112,6 @@ static void vTest8PeriodicMissTask( void * pvParameters )
 
     for( ;; )
     {
-        UBaseType_t uxLoop;
         BaseType_t xMissThisJob = pdFALSE;
         BaseType_t xDelayResult;
 
@@ -131,20 +123,21 @@ static void vTest8PeriodicMissTask( void * pvParameters )
             xMissThisJob = pdTRUE;
         }
 
-        for( uxLoop = 0u; uxLoop < pxCfg->xBase.uxLoopCount; uxLoop++ )
-        {
-            spin_ms( pxCfg->xBase.ulLoopSliceMs );
-        }
+        spin_ms( pxCfg->xBase.ulWcetMs );
 
         if( xMissThisJob != pdFALSE )
         {
-            /* Intentionally overrun while running so the kernel tick-time
-             * deadline logic catches a real execution overrun. */
+            /* Intentionally keep running past WCET so the kernel reports the
+             * overrun first, then later handles the real deadline miss. */
             spin_ms( pxCfg->xBase.ulDeadlineMs + pxCfg->ulMissOverrunMs );
+            vTraceFlushWcetOverrunEvents();
+            vTraceFlushDeadlineMissEvents();
         }
 
         /* Always use an explicit periodic boundary from task code. */
         xDelayResult = xTaskDelayUntil( &xLastWakeTime, xPeriodTicks );
+        vTraceFlushWcetOverrunEvents();
+        vTraceFlushDeadlineMissEvents();
 
         if( xDelayResult == pdFALSE )
         {
@@ -163,6 +156,7 @@ void edf_8_run( void )
 
     stdio_init_all();
     vTraceTaskPinsInit();
+    vTraceUsbPrint( "[EDF8] expected miss windows: T6 near 4 s, 8 s, ... | T7 near 6 s, 12 s, ...\r\n" );
     xEdf8SharedAnchorTick = xTaskGetTickCount();
 
     for( uxIndex = 0u;

@@ -3199,6 +3199,7 @@ typedef struct xSTATIC_TCB
         TickType_t xPeriodTicks;             /**< Task period in ticks. */
         TickType_t xWcetTicks;               /**< WCET budget in ticks. */
         TickType_t xJobExecTicks;            /**< Number of ticks spent on current job. */
+        BaseType_t xWcetOverrunReported;     /**< Mirrors TCB_t::xWcetOverrunReported for static allocation size compatibility. */
         TickType_t xRelDeadline;             /**< Relative deadline in ticks. */
         TickType_t xAbsDeadline;             /**< Absolute deadline in ticks. */
         StaticListItem_t xEDFTaskListItem;   /**< Mirrors TCB_t::xEDFTaskListItem for static allocation size compatibility. */
@@ -3210,6 +3211,15 @@ typedef struct xSTATIC_TCB
                 UBaseType_t uxSRPResourceClaimMax[ configSRP_RESOURCE_TYPE_COUNT ];
                 TickType_t xSRPResourceMaxCriticalSectionTicks[ configSRP_RESOURCE_TYPE_COUNT ];
                 UBaseType_t uxSRPResourceHeldCount[ configSRP_RESOURCE_TYPE_COUNT ];
+            #endif
+            #if ( configUSE_SRP_SHARED_STACKS == 1 )
+                StackType_t * pxSRPSavedContextBuffer;
+                configSTACK_DEPTH_TYPE uxSRPSavedContextCapacityWords;
+                configSTACK_DEPTH_TYPE uxSRPSavedContextWords;
+                configSTACK_DEPTH_TYPE uxSRPSavedImageBaseOffsetWords;
+                configSTACK_DEPTH_TYPE uxSRPSavedTopOffsetWords;
+                BaseType_t xSRPSharedStackResident;
+                BaseType_t xSRPUsesSharedStack;
             #endif
         #endif
         #if ( ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )

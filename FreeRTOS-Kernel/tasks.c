@@ -40,6 +40,7 @@
 /* FreeRTOS includes. */
 #include "FreeRTOS.h"
 #include "task.h"
+#include "queue.h"
 #include "timers.h"
 #include "stack_macros.h"
 #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
@@ -443,6 +444,7 @@ typedef struct tskTaskControlBlock       /* The old naming convention is used to
         TickType_t xPeriodTicks;             /**< Task period in ticks. */
         TickType_t xWcetTicks;               /**< WCET budget in ticks. */
         TickType_t xJobExecTicks;            /**< Number of ticks spent on current job. */
+        BaseType_t xWcetOverrunReported;     /**< pdTRUE once the current job has already reported a WCET overrun. */
         TickType_t xRelDeadline;             /**< Relative deadline in ticks. */
         TickType_t xAbsDeadline;             /**< Absolute deadline in ticks. */
         ListItem_t xEDFTaskListItem;         /**< Used to keep EDF tasks in the EDF task registry list. */
@@ -455,6 +457,15 @@ typedef struct tskTaskControlBlock       /* The old naming convention is used to
             UBaseType_t uxSRPResourceClaimMax[ configSRP_RESOURCE_TYPE_COUNT ]; /**< Declared max claim per resource type for this task. */
             TickType_t xSRPResourceMaxCriticalSectionTicks[ configSRP_RESOURCE_TYPE_COUNT ]; /**< Declared max critical-section length per resource, used by SRP admission tests. */
             UBaseType_t uxSRPResourceHeldCount[ configSRP_RESOURCE_TYPE_COUNT ]; /**< Runtime held count per resource type for this task. */
+        #endif
+        #if ( configUSE_SRP_SHARED_STACKS == 1 )
+            StackType_t * pxSRPSavedContextBuffer; /**< Compact dormant stack image for shared-stack SRP tasks. */
+            configSTACK_DEPTH_TYPE uxSRPSavedContextCapacityWords; /**< Allocated capacity of pxSRPSavedContextBuffer in StackType_t words. */
+            configSTACK_DEPTH_TYPE uxSRPSavedContextWords; /**< Number of words currently stored in pxSRPSavedContextBuffer. */
+            configSTACK_DEPTH_TYPE uxSRPSavedImageBaseOffsetWords; /**< Offset from the task's logical stack base to the saved image base. */
+            configSTACK_DEPTH_TYPE uxSRPSavedTopOffsetWords; /**< Offset from saved image base to the logical pxTopOfStack. */
+            BaseType_t xSRPSharedStackResident; /**< pdTRUE if this task's context currently resides in the shared runtime region. */
+            BaseType_t xSRPUsesSharedStack; /**< pdTRUE if this task uses the SRP shared-stack backend. */
         #endif
     #endif
     #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
@@ -549,6 +560,22 @@ typedef enum {
                  ( xDelta <= ( TickType_t ) ( portMAX_DELAY / 2U ) ) ) ? pdTRUE : pdFALSE;
     }
 
+    static BaseType_t prvEDFHasExceededWcet( TickType_t xJobExecTicks,
+                                             TickType_t xWcetTicks )
+    {
+        #if ( configEDF_WCET_OVERRUN_GRACE_TICKS == 0U )
+            return ( xJobExecTicks >= xWcetTicks ) ? pdTRUE : pdFALSE;
+        #else
+            if( xJobExecTicks <= xWcetTicks )
+            {
+                return pdFALSE;
+            }
+
+            return ( ( xJobExecTicks - xWcetTicks ) >=
+                     ( TickType_t ) configEDF_WCET_OVERRUN_GRACE_TICKS ) ? pdTRUE : pdFALSE;
+        #endif
+    }
+
 #endif
 
 #if ( configNUMBER_OF_CORES == 1 )
@@ -584,6 +611,7 @@ PRIVILEGED_DATA static List_t pxReadyTasksLists[ configMAX_PRIORITIES ]; /**< Pr
                     UBaseType_t uxPreemptionLevel;
                     configSTACK_DEPTH_TYPE uxRegionDepthWords;
                     StackType_t * pxRegionBase;
+                    TCB_t * pxResidentTCB;
                 } SRPSharedStackRegion_t;
 
                 #if ( configSRP_SHARED_STACK_SIZE == 0U )
@@ -602,12 +630,31 @@ PRIVILEGED_DATA static List_t pxReadyTasksLists[ configMAX_PRIORITIES ]; /**< Pr
                 PRIVILEGED_DATA static SRPSharedStackRegion_t xSRPSharedStackRegions[ configSRP_SHARED_STACK_MAX_LEVELS ];
                 PRIVILEGED_DATA static UBaseType_t uxSRPSharedStackRegionCount = 0U;
                 PRIVILEGED_DATA static configSTACK_DEPTH_TYPE uxSRPSharedStackUsedDepthWords = 0U;
+                PRIVILEGED_DATA static size_t uxSRPSharedStackMaxObservedBytes = 0U;
+                PRIVILEGED_DATA static size_t uxSRPNonSharedStackMaxObservedBytes = 0U;
+                PRIVILEGED_DATA static TickType_t xSRPStackUsageLastPrintTick = ( TickType_t ) 0U;
+                PRIVILEGED_DATA static BaseType_t xSRPStackUsageHeaderPrinted = pdFALSE;
 
                 static void prvSRPSharedStackGuardCorruptionDetected( const TCB_t * pxTCB,
                                                                     const StackType_t * pxCorruptedWord ) __attribute__( ( noinline ) );
                 static const SRPSharedStackRegion_t * prvSRPFindSharedStackRegionForTCB( const TCB_t * pxTCB );
+                static BaseType_t prvSRPTaskUsesSharedStack( const TCB_t * pxTCB );
                 static void prvSRPFillSharedStackGuard( StackType_t * pxRegionBase );
                 static BaseType_t prvSRPCheckSharedStackGuard( const TCB_t * pxTCB );
+                static BaseType_t prvSRPSaveTaskContextImage( TCB_t * pxTCB,
+                                                              const StackType_t * pxImageBase,
+                                                              configSTACK_DEPTH_TYPE uxImageBaseOffsetWords,
+                                                              configSTACK_DEPTH_TYPE uxImageWords,
+                                                              configSTACK_DEPTH_TYPE uxTopOffsetWords );
+                static BaseType_t prvSRPStageInitialTaskContext( TCB_t * pxTCB );
+                static BaseType_t prvSRPSaveSharedStackTaskContext( TCB_t * pxTCB );
+                static BaseType_t prvSRPRestoreSharedStackTaskContext( TCB_t * pxTCB );
+                static size_t prvSRPCurrentStackUsageWords( const TCB_t * pxTCB );
+                static void prvSRPCaptureStackUsageBytes( size_t * puxCurrentSharedBytes,
+                                                          size_t * puxCurrentNonSharedBytes,
+                                                          size_t * puxTheoreticalSharedBytes,
+                                                          size_t * puxTheoreticalNonSharedBytes );
+                static void prvSRPStackUsageMonitorPoll( void );
             #endif /* configUSE_SRP_SHARED_STACKS == 1 */
         #else // base EDF if no SRP
             PRIVILEGED_DATA static List_t xReadyEDFTasksList_UP;
@@ -740,6 +787,7 @@ PRIVILEGED_DATA static volatile configRUN_TIME_COUNTER_TYPE ulTotalRunTime[ conf
         #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
             static UBaseType_t uxSRPResourceBlockingCeilingTable[ configSRP_RESOURCE_TYPE_COUNT ];
             static UBaseType_t uxSRPResourceActiveCount[ configSRP_RESOURCE_TYPE_COUNT ]; /* Boolean-like lock state: 0 unlocked, 1 locked. */
+            static QueueHandle_t xSRPResourceSemaphoreHandles[ configSRP_RESOURCE_TYPE_COUNT ];
         #endif
 
         static BaseType_t prvSRPValidateResourceClaims( const SRPResourceClaim_t * pxResourceClaims,
@@ -784,6 +832,21 @@ PRIVILEGED_DATA static volatile configRUN_TIME_COUNTER_TYPE ulTotalRunTime[ conf
         static BaseType_t prvSRPAssignSharedStackRegion( UBaseType_t uxPreemptionLevel,
                                                          configSTACK_DEPTH_TYPE uxNewTaskStackDepth,
                                                          StackType_t ** ppxAssignedStackBase ) PRIVILEGED_FUNCTION;
+        static BaseType_t prvSRPTaskUsesSharedStack( const TCB_t * pxTCB ) PRIVILEGED_FUNCTION;
+        static BaseType_t prvSRPSaveTaskContextImage( TCB_t * pxTCB,
+                                                      const StackType_t * pxImageBase,
+                                                      configSTACK_DEPTH_TYPE uxImageBaseOffsetWords,
+                                                      configSTACK_DEPTH_TYPE uxImageWords,
+                                                      configSTACK_DEPTH_TYPE uxTopOffsetWords ) PRIVILEGED_FUNCTION;
+        static BaseType_t prvSRPStageInitialTaskContext( TCB_t * pxTCB ) PRIVILEGED_FUNCTION;
+        static BaseType_t prvSRPSaveSharedStackTaskContext( TCB_t * pxTCB ) PRIVILEGED_FUNCTION;
+        static BaseType_t prvSRPRestoreSharedStackTaskContext( TCB_t * pxTCB ) PRIVILEGED_FUNCTION;
+        static size_t prvSRPCurrentStackUsageWords( const TCB_t * pxTCB ) PRIVILEGED_FUNCTION;
+        static void prvSRPCaptureStackUsageBytes( size_t * puxCurrentSharedBytes,
+                                                  size_t * puxCurrentNonSharedBytes,
+                                                  size_t * puxTheoreticalSharedBytes,
+                                                  size_t * puxTheoreticalNonSharedBytes ) PRIVILEGED_FUNCTION;
+        static void prvSRPStackUsageMonitorPoll( void ) PRIVILEGED_FUNCTION;
         #endif
     #endif
 #endif
@@ -2230,7 +2293,8 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
 
             if( ( pxCurrent->uxTaskAttributes & taskATTRIBUTE_IS_IDLE ) == 0U )
             {
-                if( listIS_CONTAINED_WITHIN( pxReadyList, &( pxCurrent->xStateListItem ) ) != pdFALSE )
+                if( ( listIS_CONTAINED_WITHIN( pxReadyList, &( pxCurrent->xStateListItem ) ) != pdFALSE ) &&
+                    ( ( pxCurrent->uxCoreAffinityMask & ( ( UBaseType_t ) 1U << ( UBaseType_t ) xCoreID ) ) != 0U ) )
                 {
                     xCurrentIsEligible = pdTRUE;
                 }
@@ -2459,12 +2523,17 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                 List_t * const pxOldRegistryList = &( xEDFTaskRegistryLists_Part_MP[ xOldAssignedCore ] );
                 List_t * const pxNewRegistryList = &( xEDFTaskRegistryLists_Part_MP[ xNewAssignedCore ] );
 
-                if( (listLIST_ITEM_CONTAINER( &( pxTCB->xStateListItem ) ) == pxOldReadyList) || (listLIST_ITEM_CONTAINER( &( pxTCB->xEDFTaskListItem) ) ) == pxOldRegistryList)
+                if( listLIST_ITEM_CONTAINER( &( pxTCB->xEDFTaskListItem ) ) == pxOldRegistryList )
+                {
+                    ( void ) uxListRemove( &( pxTCB->xEDFTaskListItem ) );
+                    vListInsert( pxNewRegistryList, &( pxTCB->xEDFTaskListItem ) );
+                }
+
+                if( ( taskTASK_IS_RUNNING( pxTCB ) == pdFALSE ) &&
+                    ( listLIST_ITEM_CONTAINER( &( pxTCB->xStateListItem ) ) == pxOldReadyList ) )
                 {
                     ( void ) uxListRemove( &( pxTCB->xStateListItem ) );
-                    ( void ) uxListRemove( &( pxTCB->xEDFTaskListItem ) );
                     vListInsert( pxNewReadyList, &( pxTCB->xStateListItem ) );
-                    vListInsert( pxNewRegistryList, &( pxTCB->xEDFTaskListItem ) );
                 }
             }
         /*-----------------------------------------------------------*/
@@ -3176,6 +3245,16 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                 return NULL;
             }
 
+            static BaseType_t prvSRPTaskUsesSharedStack( const TCB_t * pxTCB )
+            {
+                if( pxTCB == NULL )
+                {
+                    return pdFALSE;
+                }
+
+                return ( pxTCB->xSRPUsesSharedStack != pdFALSE ) ? pdTRUE : pdFALSE;
+            }
+
             static void prvSRPFillSharedStackGuard( StackType_t * pxRegionBase )
             {
                 configSTACK_DEPTH_TYPE uxWordIndex;
@@ -3219,6 +3298,229 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                         return pdFALSE;
                     }
                 }
+
+                return pdTRUE;
+            }
+
+            static BaseType_t prvSRPSaveTaskContextImage( TCB_t * pxTCB,
+                                                          const StackType_t * pxImageBase,
+                                                          configSTACK_DEPTH_TYPE uxImageBaseOffsetWords,
+                                                          configSTACK_DEPTH_TYPE uxImageWords,
+                                                          configSTACK_DEPTH_TYPE uxTopOffsetWords )
+            {
+                StackType_t * pxSavedBuffer;
+                const SRPSharedStackRegion_t * pxRegion;
+
+                if( ( pxTCB == NULL ) ||
+                    ( pxImageBase == NULL ) ||
+                    ( uxImageWords == ( configSTACK_DEPTH_TYPE ) 0U ) ||
+                    ( uxTopOffsetWords > uxImageWords ) )
+                {
+                    return pdFALSE;
+                }
+
+                if( pxTCB->uxStackDepthWords < uxImageWords )
+                {
+                    return pdFALSE;
+                }
+
+                if( ( uxImageBaseOffsetWords > pxTCB->uxStackDepthWords ) ||
+                    ( ( uxImageBaseOffsetWords + uxImageWords ) > pxTCB->uxStackDepthWords ) )
+                {
+                    return pdFALSE;
+                }
+
+                if( pxTCB->uxSRPSavedContextCapacityWords < uxImageWords )
+                {
+                    pxSavedBuffer = ( StackType_t * ) pvPortMalloc( ( size_t ) uxImageWords * sizeof( StackType_t ) );
+
+                    if( pxSavedBuffer == NULL )
+                    {
+                        return pdFALSE;
+                    }
+
+                    if( pxTCB->pxSRPSavedContextBuffer != NULL )
+                    {
+                        vPortFree( pxTCB->pxSRPSavedContextBuffer );
+                    }
+
+                    pxTCB->pxSRPSavedContextBuffer = pxSavedBuffer;
+                    pxTCB->uxSRPSavedContextCapacityWords = uxImageWords;
+                }
+
+                ( void ) memcpy( pxTCB->pxSRPSavedContextBuffer,
+                                 pxImageBase,
+                                 ( size_t ) uxImageWords * sizeof( StackType_t ) );
+
+                pxTCB->uxSRPSavedContextWords = uxImageWords;
+                pxTCB->uxSRPSavedImageBaseOffsetWords = uxImageBaseOffsetWords;
+                pxTCB->uxSRPSavedTopOffsetWords = uxTopOffsetWords;
+                pxTCB->pxTopOfStack = pxTCB->pxSRPSavedContextBuffer + uxTopOffsetWords;
+                pxTCB->xSRPSharedStackResident = pdFALSE;
+
+                pxRegion = prvSRPFindSharedStackRegionForTCB( pxTCB );
+
+                if( ( pxRegion != NULL ) &&
+                    ( pxRegion->pxResidentTCB == pxTCB ) )
+                {
+                    ( ( SRPSharedStackRegion_t * ) pxRegion )->pxResidentTCB = NULL;
+                }
+
+                return pdTRUE;
+            }
+
+            static BaseType_t prvSRPStageInitialTaskContext( TCB_t * pxTCB )
+            {
+                size_t uxUsedWords = 0U;
+
+                #if ( portSTACK_GROWTH < 0 )
+                {
+                    const StackType_t * const pxBase = pxTCB->pxStack;
+                    const StackType_t * const pxTop = ( const StackType_t * ) pxTCB->pxTopOfStack;
+
+                    if( pxTop < pxBase )
+                    {
+                        uxUsedWords = ( size_t ) pxTCB->uxStackDepthWords;
+                    }
+                    else
+                    {
+                        const ptrdiff_t xWordsFree = ( pxTop - pxBase ) + 1;
+
+                        if( xWordsFree <= 0 )
+                        {
+                            uxUsedWords = ( size_t ) pxTCB->uxStackDepthWords;
+                        }
+                        else if( xWordsFree >= ( ptrdiff_t ) pxTCB->uxStackDepthWords )
+                        {
+                            uxUsedWords = 0U;
+                        }
+                        else
+                        {
+                            uxUsedWords = ( size_t ) ( ( ptrdiff_t ) pxTCB->uxStackDepthWords - xWordsFree );
+                        }
+                    }
+                }
+                #else
+                {
+                    const StackType_t * const pxBase = pxTCB->pxStack;
+                    const StackType_t * const pxTop = ( const StackType_t * ) pxTCB->pxTopOfStack;
+
+                    if( pxTop >= pxBase )
+                    {
+                        const ptrdiff_t xWordsUsed = ( pxTop - pxBase ) + 1;
+
+                        if( xWordsUsed > 0 )
+                        {
+                            uxUsedWords = ( xWordsUsed >= ( ptrdiff_t ) pxTCB->uxStackDepthWords ) ? ( size_t ) pxTCB->uxStackDepthWords : ( size_t ) xWordsUsed;
+                        }
+                    }
+                }
+                #endif
+
+                if( uxUsedWords == 0U )
+                {
+                    return pdFALSE;
+                }
+
+                return prvSRPSaveTaskContextImage( pxTCB,
+                                                   ( const StackType_t * ) pxTCB->pxTopOfStack,
+                                                   ( configSTACK_DEPTH_TYPE ) ( ( const StackType_t * ) pxTCB->pxTopOfStack - pxTCB->pxStack ),
+                                                   ( configSTACK_DEPTH_TYPE ) uxUsedWords,
+                                                   ( configSTACK_DEPTH_TYPE ) 0U );
+            }
+
+            static BaseType_t prvSRPSaveSharedStackTaskContext( TCB_t * pxTCB )
+            {
+                const configSTACK_DEPTH_TYPE uxTopOffsetWords = ( configSTACK_DEPTH_TYPE ) portSTACK_LIMIT_PADDING;
+                const size_t uxUsedWords = prvSRPCurrentStackUsageWords( pxTCB );
+                const StackType_t * pxImageBase;
+                configSTACK_DEPTH_TYPE uxImageWords;
+                configSTACK_DEPTH_TYPE uxImageBaseOffsetWords;
+
+                if( prvSRPTaskUsesSharedStack( pxTCB ) == pdFALSE )
+                {
+                    return pdTRUE;
+                }
+
+                if( pxTCB->xSRPSharedStackResident == pdFALSE )
+                {
+                    return pdTRUE;
+                }
+
+                if( uxUsedWords == 0U )
+                {
+                    return pdFALSE;
+                }
+
+                uxImageWords = ( configSTACK_DEPTH_TYPE ) uxUsedWords + uxTopOffsetWords;
+
+                if( uxImageWords > pxTCB->uxStackDepthWords )
+                {
+                    return pdFALSE;
+                }
+
+                if( ( const StackType_t * ) pxTCB->pxTopOfStack < ( pxTCB->pxStack + uxTopOffsetWords ) )
+                {
+                    return pdFALSE;
+                }
+
+                pxImageBase = ( const StackType_t * ) pxTCB->pxTopOfStack - uxTopOffsetWords;
+                uxImageBaseOffsetWords = ( configSTACK_DEPTH_TYPE ) ( pxImageBase - pxTCB->pxStack );
+
+                return prvSRPSaveTaskContextImage( pxTCB,
+                                                   pxImageBase,
+                                                   uxImageBaseOffsetWords,
+                                                   uxImageWords,
+                                                   uxTopOffsetWords );
+            }
+
+            static BaseType_t prvSRPRestoreSharedStackTaskContext( TCB_t * pxTCB )
+            {
+                const SRPSharedStackRegion_t * pxRegion;
+                StackType_t * pxImageBase;
+
+                if( prvSRPTaskUsesSharedStack( pxTCB ) == pdFALSE )
+                {
+                    return pdTRUE;
+                }
+
+                if( pxTCB->xSRPSharedStackResident != pdFALSE )
+                {
+                    return pdTRUE;
+                }
+
+                if( ( pxTCB->pxSRPSavedContextBuffer == NULL ) ||
+                    ( pxTCB->uxSRPSavedContextWords == ( configSTACK_DEPTH_TYPE ) 0U ) ||
+                    ( pxTCB->uxSRPSavedImageBaseOffsetWords > pxTCB->uxStackDepthWords ) ||
+                    ( ( pxTCB->uxSRPSavedImageBaseOffsetWords + pxTCB->uxSRPSavedContextWords ) > pxTCB->uxStackDepthWords ) ||
+                    ( pxTCB->uxSRPSavedTopOffsetWords > pxTCB->uxSRPSavedContextWords ) ||
+                    ( pxTCB->uxSRPSavedContextWords > pxTCB->uxStackDepthWords ) )
+                {
+                    return pdFALSE;
+                }
+
+                pxRegion = prvSRPFindSharedStackRegionForTCB( pxTCB );
+
+                if( pxRegion == NULL )
+                {
+                    return pdFALSE;
+                }
+
+                if( ( pxRegion->pxResidentTCB != NULL ) &&
+                    ( pxRegion->pxResidentTCB != pxTCB ) )
+                {
+                    return pdFALSE;
+                }
+
+                pxImageBase = pxRegion->pxRegionBase + pxTCB->uxSRPSavedImageBaseOffsetWords;
+
+                ( void ) memcpy( pxImageBase,
+                                 pxTCB->pxSRPSavedContextBuffer,
+                                 ( size_t ) pxTCB->uxSRPSavedContextWords * sizeof( StackType_t ) );
+
+                pxTCB->pxTopOfStack = pxImageBase + pxTCB->uxSRPSavedTopOffsetWords;
+                pxTCB->xSRPSharedStackResident = pdTRUE;
+                ( ( SRPSharedStackRegion_t * ) pxRegion )->pxResidentTCB = pxTCB;
 
                 return pdTRUE;
             }
@@ -3310,6 +3612,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                 xSRPSharedStackRegions[ uxSRPSharedStackRegionCount ].uxPreemptionLevel = uxPreemptionLevel;
                 xSRPSharedStackRegions[ uxSRPSharedStackRegionCount ].uxRegionDepthWords = uxRequiredDepth;
                 xSRPSharedStackRegions[ uxSRPSharedStackRegionCount ].pxRegionBase = &xSRPSharedStackBuffer[ uxSRPSharedStackUsedDepthWords + ( configSTACK_DEPTH_TYPE ) configSRP_SHARED_STACK_GUARD_WORDS ];
+                xSRPSharedStackRegions[ uxSRPSharedStackRegionCount ].pxResidentTCB = NULL;
                 prvSRPFillSharedStackGuard( xSRPSharedStackRegions[ uxSRPSharedStackRegionCount ].pxRegionBase );
 
                 *ppxAssignedStackBase = xSRPSharedStackRegions[ uxSRPSharedStackRegionCount ].pxRegionBase;
@@ -3319,6 +3622,179 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                 uxSRPSharedStackRegionCount++;
 
                 return pdTRUE;
+            }
+
+            static size_t prvSRPCurrentStackUsageWords( const TCB_t * pxTCB )
+            {
+                if( ( prvSRPTaskUsesSharedStack( pxTCB ) != pdFALSE ) &&
+                    ( pxTCB->xSRPSharedStackResident == pdFALSE ) )
+                {
+                    if( pxTCB->uxSRPSavedContextWords >= pxTCB->uxSRPSavedTopOffsetWords )
+                    {
+                        return ( size_t ) ( pxTCB->uxSRPSavedContextWords - pxTCB->uxSRPSavedTopOffsetWords );
+                    }
+
+                    return 0U;
+                }
+
+                const configSTACK_DEPTH_TYPE uxDepthWords = pxTCB->uxStackDepthWords;
+
+                if( uxDepthWords == ( configSTACK_DEPTH_TYPE ) 0U )
+                {
+                    return 0U;
+                }
+
+                #if ( portSTACK_GROWTH < 0 )
+                {
+                    const StackType_t * const pxBase = pxTCB->pxStack;
+                    const StackType_t * const pxTop = ( const StackType_t * ) pxTCB->pxTopOfStack;
+
+                    if( pxTop < pxBase )
+                    {
+                        return ( size_t ) uxDepthWords;
+                    }
+
+                    {
+                        const ptrdiff_t xWordsFree = ( pxTop - pxBase ) + 1;
+
+                        if( xWordsFree <= 0 )
+                        {
+                            return ( size_t ) uxDepthWords;
+                        }
+
+                        if( xWordsFree >= ( ptrdiff_t ) uxDepthWords )
+                        {
+                            return 0U;
+                        }
+
+                        return ( size_t ) ( ( ptrdiff_t ) uxDepthWords - xWordsFree );
+                    }
+                }
+                #else
+                {
+                    const StackType_t * const pxBase = pxTCB->pxStack;
+                    const StackType_t * const pxTop = ( const StackType_t * ) pxTCB->pxTopOfStack;
+
+                    if( pxTop < pxBase )
+                    {
+                        return 0U;
+                    }
+
+                    {
+                        const ptrdiff_t xWordsUsed = ( pxTop - pxBase ) + 1;
+
+                        if( xWordsUsed <= 0 )
+                        {
+                            return 0U;
+                        }
+
+                        if( xWordsUsed >= ( ptrdiff_t ) uxDepthWords )
+                        {
+                            return ( size_t ) uxDepthWords;
+                        }
+
+                        return ( size_t ) xWordsUsed;
+                    }
+                }
+                #endif
+            }
+
+            static void prvSRPCaptureStackUsageBytes( size_t * puxCurrentSharedBytes,
+                                                      size_t * puxCurrentNonSharedBytes,
+                                                      size_t * puxTheoreticalSharedBytes,
+                                                      size_t * puxTheoreticalNonSharedBytes )
+            {
+                size_t uxCurrentSharedWords = 0U;
+                size_t uxCurrentNonSharedWords = 0U;
+                size_t uxTheoreticalSharedWords = 0U;
+                size_t uxTheoreticalNonSharedWords = 0U;
+                size_t uxPerLevelCurrentMaxWords[ configSRP_SHARED_STACK_MAX_LEVELS ] = { 0U };
+                UBaseType_t uxRegionIndex;
+
+                vTaskSuspendAll();
+                {
+                    for( uxRegionIndex = 0U; uxRegionIndex < uxSRPSharedStackRegionCount; uxRegionIndex++ )
+                    {
+                        uxTheoreticalSharedWords += ( size_t ) xSRPSharedStackRegions[ uxRegionIndex ].uxRegionDepthWords;
+                    }
+
+                    if( listLIST_IS_INITIALISED( &xSRPTaskRegistryList_UP ) != pdFALSE )
+                    {
+                        ListItem_t * pxItem;
+
+                        for( pxItem = listGET_HEAD_ENTRY( &xSRPTaskRegistryList_UP );
+                             pxItem != listGET_END_MARKER( &xSRPTaskRegistryList_UP );
+                             pxItem = listGET_NEXT( pxItem ) )
+                        {
+                            const TCB_t * pxTCB = ( const TCB_t * ) listGET_LIST_ITEM_OWNER( pxItem );
+                            const size_t uxTaskUsedWords = prvSRPCurrentStackUsageWords( pxTCB );
+
+                            uxCurrentNonSharedWords += uxTaskUsedWords;
+                            uxTheoreticalNonSharedWords += ( size_t ) pxTCB->uxStackDepthWords;
+
+                            for( uxRegionIndex = 0U; uxRegionIndex < uxSRPSharedStackRegionCount; uxRegionIndex++ )
+                            {
+                                if( xSRPSharedStackRegions[ uxRegionIndex ].uxPreemptionLevel == pxTCB->uxPriorityCeiling )
+                                {
+                                    if( uxTaskUsedWords > uxPerLevelCurrentMaxWords[ uxRegionIndex ] )
+                                    {
+                                        uxPerLevelCurrentMaxWords[ uxRegionIndex ] = uxTaskUsedWords;
+                                    }
+
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                ( void ) xTaskResumeAll();
+
+                for( uxRegionIndex = 0U; uxRegionIndex < uxSRPSharedStackRegionCount; uxRegionIndex++ )
+                {
+                    uxCurrentSharedWords += uxPerLevelCurrentMaxWords[ uxRegionIndex ];
+                }
+
+                if( puxCurrentSharedBytes != NULL )
+                {
+                    *puxCurrentSharedBytes = uxCurrentSharedWords * sizeof( StackType_t );
+                }
+
+                if( puxCurrentNonSharedBytes != NULL )
+                {
+                    *puxCurrentNonSharedBytes = uxCurrentNonSharedWords * sizeof( StackType_t );
+                }
+
+                if( puxTheoreticalSharedBytes != NULL )
+                {
+                    *puxTheoreticalSharedBytes = uxTheoreticalSharedWords * sizeof( StackType_t );
+                }
+
+                if( puxTheoreticalNonSharedBytes != NULL )
+                {
+                    *puxTheoreticalNonSharedBytes = uxTheoreticalNonSharedWords * sizeof( StackType_t );
+                }
+            }
+
+            static void prvSRPStackUsageMonitorPoll( void )
+            {
+                size_t uxCurrentSharedBytes;
+                size_t uxCurrentNonSharedBytes;
+                size_t uxTheoreticalSharedBytes;
+                size_t uxTheoreticalNonSharedBytes;
+                prvSRPCaptureStackUsageBytes( &uxCurrentSharedBytes,
+                                              &uxCurrentNonSharedBytes,
+                                              &uxTheoreticalSharedBytes,
+                                              &uxTheoreticalNonSharedBytes );
+
+                if( uxCurrentSharedBytes > uxSRPSharedStackMaxObservedBytes )
+                {
+                    uxSRPSharedStackMaxObservedBytes = uxCurrentSharedBytes;
+                }
+
+                if( uxCurrentNonSharedBytes > uxSRPNonSharedStackMaxObservedBytes )
+                {
+                    uxSRPNonSharedStackMaxObservedBytes = uxCurrentNonSharedBytes;
+                }
             }
         #endif /* configUSE_SRP_SHARED_STACKS == 1 */
 
@@ -3386,12 +3862,48 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                 {
                     if( pxTCB->uxSRPResourceHeldCount[ uxResourceType ] != 0U )
                     {
+                        QueueHandle_t xSemaphore = xSRPResourceSemaphoreHandles[ uxResourceType ];
+
+                        if( xSemaphore != NULL )
+                        {
+                            ( void ) xQueueSemaphoreForceGiveSRP( xSemaphore );
+                        }
+
                         uxSRPResourceActiveCount[ uxResourceType ] = 0U;
                         pxTCB->uxSRPResourceHeldCount[ uxResourceType ] = 0U;
                     }
                 }
             #else
                 ( void ) pxTCB;
+            #endif
+        }
+
+    /*-----------------------------------------------------------*/
+
+        void vTaskSRPRegisterResourceSemaphore( UBaseType_t uxResourceType,
+                                                void * pvSemaphoreHandle )
+        {
+            #if ( configSRP_RESOURCE_TYPE_COUNT > 0U )
+                QueueHandle_t xSemaphore = ( QueueHandle_t ) pvSemaphoreHandle;
+
+                configASSERT( uxResourceType < ( UBaseType_t ) configSRP_RESOURCE_TYPE_COUNT );
+                configASSERT( xSemaphore != NULL );
+
+                taskENTER_CRITICAL();
+                {
+                    if( xSRPResourceSemaphoreHandles[ uxResourceType ] == NULL )
+                    {
+                        xSRPResourceSemaphoreHandles[ uxResourceType ] = xSemaphore;
+                    }
+                    else
+                    {
+                        configASSERT( xSRPResourceSemaphoreHandles[ uxResourceType ] == xSemaphore );
+                    }
+                }
+                taskEXIT_CRITICAL();
+            #else
+                ( void ) uxResourceType;
+                ( void ) pvSemaphoreHandle;
             #endif
         }
 
@@ -3508,6 +4020,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
         {
             BaseType_t xReturn = pdFAIL;
             TCB_t * pxReleasedFromTCB = NULL;
+            BaseType_t xShouldPendYield = pdFALSE;
 
             if( uxResourceType >= ( UBaseType_t ) configSRP_RESOURCE_TYPE_COUNT )
             {
@@ -3530,12 +4043,32 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                             pxCurrentTCB->uxSRPResourceHeldCount[ uxResourceType ] = 0U;
                             pxReleasedFromTCB = pxCurrentTCB;
                             prvSRPRecomputeSystemCeiling();
+
+                            #if ( configUSE_PREEMPTION == 1 )
+                            {
+                                TCB_t * pxNextTCB = prvSRPSelectReadyTask();
+
+                                if( ( pxNextTCB != NULL ) &&
+                                    ( pxNextTCB != pxCurrentTCB ) )
+                                {
+                                    xShouldPendYield = pdTRUE;
+                                }
+                            }
+                            #endif
+
                             xReturn = pdPASS;
                         }
                     }
                 #endif
             }
             taskEXIT_CRITICAL();
+
+            #if ( configUSE_PREEMPTION == 1 )
+                if( xShouldPendYield != pdFALSE )
+                {
+                    xYieldPendings[ portGET_CORE_ID() ] = pdTRUE;
+                }
+            #endif
 
             #if ( configUSE_SRP_RESOURCE_RELEASE_HOOK == 1 )
                 if( ( xReturn == pdPASS ) &&
@@ -3575,7 +4108,17 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                          pxItem = listGET_NEXT( pxItem ) )
                     {
                         const TCB_t * pxTCB = ( const TCB_t * ) listGET_LIST_ITEM_OWNER( pxItem );
-                        uxPerTaskBytes += ( ( size_t ) pxTCB->uxStackDepthWords ) * sizeof( StackType_t );
+
+                        #if ( configUSE_SRP_SHARED_STACKS == 1 )
+                        if( prvSRPTaskUsesSharedStack( pxTCB ) != pdFALSE )
+                        {
+                            uxPerTaskBytes += ( ( size_t ) pxTCB->uxSRPSavedContextCapacityWords ) * sizeof( StackType_t );
+                        }
+                        else
+                        #endif
+                        {
+                            uxPerTaskBytes += ( ( size_t ) pxTCB->uxStackDepthWords ) * sizeof( StackType_t );
+                        }
                     }
                 }
             }
@@ -3591,6 +4134,68 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                 *puxPerTaskBytes = uxPerTaskBytes;
             }
         }
+
+        #if( configUSE_SRP_SHARED_STACKS == 1 )
+
+        void vTaskGetSRPStackUsageRuntimeStats( size_t * puxCurrentSharedBytes,
+                                                size_t * puxCurrentNonSharedBytes,
+                                                size_t * puxMaxSharedBytes,
+                                                size_t * puxMaxNonSharedBytes,
+                                                size_t * puxTheoreticalSharedBytes,
+                                                size_t * puxTheoreticalNonSharedBytes )
+        {
+            size_t uxCurrentSharedBytes = 0U;
+            size_t uxCurrentNonSharedBytes = 0U;
+            size_t uxTheoreticalSharedBytes = 0U;
+            size_t uxTheoreticalNonSharedBytes = 0U;
+
+            prvSRPCaptureStackUsageBytes( &uxCurrentSharedBytes,
+                                          &uxCurrentNonSharedBytes,
+                                          &uxTheoreticalSharedBytes,
+                                          &uxTheoreticalNonSharedBytes );
+
+            if( uxCurrentSharedBytes > uxSRPSharedStackMaxObservedBytes )
+            {
+                uxSRPSharedStackMaxObservedBytes = uxCurrentSharedBytes;
+            }
+
+            if( uxCurrentNonSharedBytes > uxSRPNonSharedStackMaxObservedBytes )
+            {
+                uxSRPNonSharedStackMaxObservedBytes = uxCurrentNonSharedBytes;
+            }
+
+            if( puxCurrentSharedBytes != NULL )
+            {
+                *puxCurrentSharedBytes = uxCurrentSharedBytes;
+            }
+
+            if( puxCurrentNonSharedBytes != NULL )
+            {
+                *puxCurrentNonSharedBytes = uxCurrentNonSharedBytes;
+            }
+
+            if( puxMaxSharedBytes != NULL )
+            {
+                *puxMaxSharedBytes = uxSRPSharedStackMaxObservedBytes;
+            }
+
+            if( puxMaxNonSharedBytes != NULL )
+            {
+                *puxMaxNonSharedBytes = uxSRPNonSharedStackMaxObservedBytes;
+            }
+
+            if( puxTheoreticalSharedBytes != NULL )
+            {
+                *puxTheoreticalSharedBytes = uxTheoreticalSharedBytes;
+            }
+
+            if( puxTheoreticalNonSharedBytes != NULL )
+            {
+                *puxTheoreticalNonSharedBytes = uxTheoreticalNonSharedBytes;
+            }
+        }
+
+        #endif /* configUSE_SRP_SHARED_STACKS == 1 */
 
     #endif /* ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) */
 
@@ -3865,10 +4470,29 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                             pxNewTCB->xAbsJobReleaseTime = curr_tick;
                             pxNewTCB->xPeriodTicks = xPeriodTicks;
                             pxNewTCB->xJobExecTicks = ( TickType_t ) 0U;
+                            pxNewTCB->xWcetOverrunReported = pdFALSE;
                             pxNewTCB->xWcetTicks = xWcetTicks;
                             pxNewTCB->xRelDeadline = xRelDeadlineTicks;
                             pxNewTCB->xAbsDeadline = curr_tick + xRelDeadlineTicks;
                         }
+
+                        #if ( configUSE_SRP_SHARED_STACKS == 1 )
+                        {
+                            if( prvSRPStageInitialTaskContext( pxNewTCB ) == pdFALSE )
+                            {
+                                if( pxNewTCB->pxSRPSavedContextBuffer != NULL )
+                                {
+                                    vPortFree( pxNewTCB->pxSRPSavedContextBuffer );
+                                }
+
+                                vPortFree( pxNewTCB );
+                                traceRETURN_xTaskCreate( errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY );
+                                return errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY;
+                            }
+
+                            pxNewTCB->xSRPUsesSharedStack = pdTRUE;
+                        }
+                        #endif
 
                         prvAddNewTaskToReadyList( pxNewTCB );
                         xReturn = pdPASS;
@@ -3964,6 +4588,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                         pxNewTCB->xAbsJobReleaseTime = curr_tick;
                         pxNewTCB->xPeriodTicks = xPeriodTicks;
                         pxNewTCB->xJobExecTicks = ( TickType_t ) 0U;
+                        pxNewTCB->xWcetOverrunReported = pdFALSE;
                         pxNewTCB->xWcetTicks = xWcetTicks;
                         pxNewTCB->xRelDeadline = xRelDeadlineTicks;
                         pxNewTCB->xAbsDeadline = curr_tick + xRelDeadlineTicks;
@@ -4092,6 +4717,7 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                     pxNewTCB->xAbsJobReleaseTime = curr_tick;
                     pxNewTCB->xPeriodTicks = xPeriodTicks;
                     pxNewTCB->xJobExecTicks = ( TickType_t ) 0U;
+                    pxNewTCB->xWcetOverrunReported = pdFALSE;
                     pxNewTCB->xWcetTicks = xWcetTicks;
                     pxNewTCB->xRelDeadline = xRelDeadlineTicks;
                     pxNewTCB->xAbsDeadline = curr_tick + xRelDeadlineTicks;
@@ -4308,7 +4934,9 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
         /* Default non-EDF/internal tasks to the farthest deadline in EDF mode. */
         pxNewTCB->xAbsJobReleaseTime = xTickCount;
         pxNewTCB->xPeriodTicks = ( TickType_t ) 0U;
+        pxNewTCB->xJobExecTicks = ( TickType_t ) 0U;
         pxNewTCB->xWcetTicks = ( TickType_t ) 0U;
+        pxNewTCB->xWcetOverrunReported = pdFALSE;
         pxNewTCB->xRelDeadline = portMAX_DELAY;
         pxNewTCB->xAbsDeadline = portMAX_DELAY;
 
@@ -4338,6 +4966,17 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
             ( void ) memset( pxNewTCB->uxSRPResourceHeldCount,
                              0,
                              sizeof( pxNewTCB->uxSRPResourceHeldCount ) );
+        }
+        #endif
+        #if ( configUSE_SRP_SHARED_STACKS == 1 )
+        {
+            pxNewTCB->pxSRPSavedContextBuffer = NULL;
+            pxNewTCB->uxSRPSavedContextCapacityWords = ( configSTACK_DEPTH_TYPE ) 0U;
+            pxNewTCB->uxSRPSavedContextWords = ( configSTACK_DEPTH_TYPE ) 0U;
+            pxNewTCB->uxSRPSavedImageBaseOffsetWords = ( configSTACK_DEPTH_TYPE ) 0U;
+            pxNewTCB->uxSRPSavedTopOffsetWords = ( configSTACK_DEPTH_TYPE ) 0U;
+            pxNewTCB->xSRPSharedStackResident = pdFALSE;
+            pxNewTCB->xSRPUsesSharedStack = pdFALSE;
         }
         #endif
     }
@@ -5665,7 +6304,6 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
                             if( xCoreID != xNewAssignedCore )
                             {
                                 prvYieldCore( xCoreID );
-                                prvYieldCore( xNewAssignedCore );
                             }
                         }
                         else
@@ -6423,6 +7061,15 @@ void vTaskStartScheduler( void )
          * so interrupts will automatically get re-enabled when the first task
          * starts to run. */
         portDISABLE_INTERRUPTS();
+
+        #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) && ( configUSE_SRP_SHARED_STACKS == 1 ) )
+        {
+            if( prvSRPTaskUsesSharedStack( pxCurrentTCB ) != pdFALSE )
+            {
+                configASSERT( prvSRPRestoreSharedStackTaskContext( pxCurrentTCB ) != pdFALSE );
+            }
+        }
+        #endif
 
         #if ( configUSE_C_RUNTIME_TLS_SUPPORT == 1 )
         {
@@ -7437,13 +8084,15 @@ BaseType_t xTaskIncrementTick( void )
                                                 pxCurrentTCB->xAbsDeadline ) != pdFALSE )
                             )
                         {
-                            traceTASK_DEADLINE_MISSED();
+                            traceTASK_DEADLINE_MISSED_FOR_TASK( pxCurrentTCB );
                             xStopCurrentJob = pdTRUE;
                         }
-                        else if(
-                                ( pxCurrentTCB->xJobExecTicks >= pxCurrentTCB->xWcetTicks ) )
+                        else if( ( pxCurrentTCB->xWcetOverrunReported == pdFALSE ) &&
+                                 ( prvEDFHasExceededWcet( pxCurrentTCB->xJobExecTicks,
+                                                          pxCurrentTCB->xWcetTicks ) != pdFALSE ) )
                         {
-                            xStopCurrentJob = pdTRUE;
+                            pxCurrentTCB->xWcetOverrunReported = pdTRUE;
+                            traceTASK_WCET_OVERRUN_FOR_TASK( pxCurrentTCB );
                         }
 
                         if( xStopCurrentJob != pdFALSE )
@@ -7536,8 +8185,19 @@ BaseType_t xTaskIncrementTick( void )
                         #endif
                             )
                         {
-                            traceTASK_DEADLINE_MISSED();
+                            traceTASK_DEADLINE_MISSED_FOR_TASK( pxCurrentTCB );
                             xStopCurrentJob = pdTRUE;
+                        }
+                        else if( ( pxCurrentTCB->xWcetOverrunReported == pdFALSE ) &&
+                                  ( prvEDFHasExceededWcet( pxCurrentTCB->xJobExecTicks,
+                                                           pxCurrentTCB->xWcetTicks ) != pdFALSE )
+                        #if ( ( configUSE_UP == 1 ) && ( configUSE_CBS == 1 ) )
+                            && ( prvTaskIsCBSManaged( pxCurrentTCB ) == pdFALSE )
+                        #endif
+                            )
+                        {
+                            pxCurrentTCB->xWcetOverrunReported = pdTRUE;
+                            traceTASK_WCET_OVERRUN_FOR_TASK( pxCurrentTCB );
                         }
 
                         if( xStopCurrentJob != pdFALSE )
@@ -7590,40 +8250,68 @@ BaseType_t xTaskIncrementTick( void )
 
                         pxRunningTCB->xJobExecTicks++;
 
-                        if( ( prvTickTimeIsAfter( xConstTickCount, pxRunningTCB->xAbsDeadline ) != pdFALSE ) ||
-                            ( pxRunningTCB->xJobExecTicks >= pxRunningTCB->xWcetTicks ) )
                         {
-                            const TickType_t xNextReleaseTime = prvPeriodicTaskNextReleaseAfter( pxRunningTCB,
-                                                                                                  xConstTickCount );
+                            const BaseType_t xDeadlineMissed = prvTickTimeIsAfter( xConstTickCount,
+                                                                                   pxRunningTCB->xAbsDeadline );
+                            const BaseType_t xWcetOverrun = prvEDFHasExceededWcet( pxRunningTCB->xJobExecTicks,
+                                                                                    pxRunningTCB->xWcetTicks );
 
-                            if( prvTickTimeIsAfter( xConstTickCount, pxRunningTCB->xAbsDeadline ) != pdFALSE )
+                            if( xDeadlineMissed != pdFALSE )
                             {
-                                traceTASK_DEADLINE_MISSED();
+                                const TickType_t xNextReleaseTime = prvPeriodicTaskNextReleaseAfter( pxRunningTCB,
+                                                                                                      xConstTickCount );
+
+                                #if ( PARTITIONED_EDF_ENABLE == 1U )
+                                    const char * const pcMPPolicy = "partitioned";
+                                #else
+                                    const char * const pcMPPolicy = "global";
+                                #endif
+                                const char * const pcMPReason = "deadline miss";
+
+                                vTraceRecordMPOverrunEvent( pcMPPolicy,
+                                                            pcMPReason,
+                                                            pxRunningTCB->pcTaskName,
+                                                            ( uint32_t ) ( uintptr_t ) pxRunningTCB->pxTaskTag,
+                                                            ( uint32_t ) xEDFCoreID,
+                                                            ( uint32_t ) xConstTickCount,
+                                                            ( uint32_t ) pxRunningTCB->xAbsJobReleaseTime,
+                                                            ( uint32_t ) pxRunningTCB->xAbsDeadline,
+                                                            ( uint32_t ) pxRunningTCB->xJobExecTicks,
+                                                            ( uint32_t ) pxRunningTCB->xWcetTicks,
+                                                            ( uint32_t ) xNextReleaseTime );
+
+                                traceTASK_DEADLINE_MISSED_FOR_TASK( pxRunningTCB );
+
+                                prvPeriodicTaskAdvanceAndReinsert( pxRunningTCB,
+                                                                   &( pxRunningTCB->xEDFTaskListItem ),
+                                                                   pxEDFRegistryList,
+                                                                   xNextReleaseTime );
+
+                                prvAddTaskToDelayedListForTask( pxRunningTCB,
+                                                                xNextReleaseTime - xConstTickCount,
+                                                                pdFALSE );
+
+                                if( xEDFCoreID == ( BaseType_t ) portGET_CORE_ID() )
+                                {
+                                    xSwitchRequired = pdTRUE;
+                                }
+                                else
+                                {
+                                    prvYieldCore( xEDFCoreID );
+                                }
                             }
-
-                            prvPeriodicTaskAdvanceAndReinsert( pxRunningTCB,
-                                                               &( pxRunningTCB->xEDFTaskListItem ),
-                                                               pxEDFRegistryList,
-                                                               xNextReleaseTime );
-
-                            prvAddTaskToDelayedListForTask( pxRunningTCB,
-                                                            xNextReleaseTime - xConstTickCount,
-                                                            pdFALSE );
-
-                            if( xEDFCoreID == ( BaseType_t ) portGET_CORE_ID() )
+                            else if( ( xWcetOverrun != pdFALSE ) &&
+                                     ( pxRunningTCB->xWcetOverrunReported == pdFALSE ) )
                             {
-                                xSwitchRequired = pdTRUE;
-                            }
-                            else
-                            {
-                                prvYieldCore( xEDFCoreID );
+                                pxRunningTCB->xWcetOverrunReported = pdTRUE;
+                                traceTASK_WCET_OVERRUN_FOR_TASK( pxRunningTCB );
                             }
                         }
                     }
                 }
                 #endif
-            #endif
         }
+        #endif /* configUSE_EDF == 1 */
         if( xConstTickCount == ( TickType_t ) 0U )
         {
             taskSWITCH_DELAYED_LISTS();
@@ -7983,6 +8671,10 @@ BaseType_t xTaskIncrementTick( void )
 #if ( configNUMBER_OF_CORES == 1 )
     void vTaskSwitchContext( void )
     {
+        #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) && ( configUSE_SRP_SHARED_STACKS == 1 ) )
+            TCB_t * pxPreviousTCB;
+        #endif
+
         traceENTER_vTaskSwitchContext();
 
         if( uxSchedulerSuspended != ( UBaseType_t ) 0U )
@@ -7993,6 +8685,9 @@ BaseType_t xTaskIncrementTick( void )
         }
         else
         {
+            #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) && ( configUSE_SRP_SHARED_STACKS == 1 ) )
+            pxPreviousTCB = pxCurrentTCB;
+            #endif
             xYieldPendings[ 0 ] = pdFALSE;
             traceTASK_SWITCHED_OUT();
 
@@ -8113,6 +8808,21 @@ BaseType_t xTaskIncrementTick( void )
             #else
             {
                 taskSELECT_HIGHEST_PRIORITY_TASK();
+            }
+            #endif
+
+            #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) && ( configUSE_SRP_SHARED_STACKS == 1 ) )
+            {
+                if( ( pxPreviousTCB != pxCurrentTCB ) &&
+                    ( prvSRPTaskUsesSharedStack( pxPreviousTCB ) != pdFALSE ) )
+                {
+                    configASSERT( prvSRPSaveSharedStackTaskContext( pxPreviousTCB ) != pdFALSE );
+                }
+
+                if( prvSRPTaskUsesSharedStack( pxCurrentTCB ) != pdFALSE )
+                {
+                    configASSERT( prvSRPRestoreSharedStackTaskContext( pxCurrentTCB ) != pdFALSE );
+                }
             }
             #endif
 
@@ -8796,6 +9506,12 @@ static portTASK_FUNCTION( prvIdleTask, pvParameters )
          * is responsible for freeing the deleted task's TCB and stack. */
         prvCheckTasksWaitingTermination();
 
+        #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) && ( configUSE_SRP_SHARED_STACKS == 1 ) )
+        {
+            prvSRPStackUsageMonitorPoll();
+        }
+        #endif
+
         #if ( configUSE_PREEMPTION == 0 )
         {
             /* If we are not using preemption we keep forcing a task switch to
@@ -9471,6 +10187,24 @@ static void prvCheckTasksWaitingTermination( void )
 
     static void prvDeleteTCB( TCB_t * pxTCB )
     {
+        #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) && ( configUSE_SRP_SHARED_STACKS == 1 ) )
+        {
+            const SRPSharedStackRegion_t * pxRegion = prvSRPFindSharedStackRegionForTCB( pxTCB );
+
+            if( ( pxRegion != NULL ) &&
+                ( pxRegion->pxResidentTCB == pxTCB ) )
+            {
+                ( ( SRPSharedStackRegion_t * ) pxRegion )->pxResidentTCB = NULL;
+            }
+
+            if( pxTCB->pxSRPSavedContextBuffer != NULL )
+            {
+                vPortFree( pxTCB->pxSRPSavedContextBuffer );
+                pxTCB->pxSRPSavedContextBuffer = NULL;
+            }
+        }
+        #endif
+
         /* This call is required specifically for the TriCore port.  It must be
          * above the vPortFree() calls.  The call is also used by ports/demos that
          * want to allocate and clean RAM statically. */
@@ -9569,6 +10303,7 @@ static void prvResetNextTaskUnblockTime( void )
         pxTCB->xAbsJobReleaseTime = xNextReleaseTime;
         pxTCB->xAbsDeadline = xNextReleaseTime + pxTCB->xRelDeadline;
         pxTCB->xJobExecTicks = ( TickType_t ) 0U;
+        pxTCB->xWcetOverrunReported = pdFALSE;
 
         ( void ) uxListRemove( pxTaskListItem );
         listSET_LIST_ITEM_VALUE( pxTaskListItem, pxTCB->xAbsJobReleaseTime );

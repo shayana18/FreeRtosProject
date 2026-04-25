@@ -3,9 +3,9 @@
 - Added SRP configuration flags in `schedulingConfig.h`, including `configUSE_SRP`, `configSRP_RESOURCE_TYPE_COUNT`, `configUSE_SRP_SHARED_STACKS`, `configSRP_SHARED_STACK_SIZE`, `configSRP_SHARED_STACK_GUARD_WORDS`, and `configSRP_SHARED_STACK_MAX_LEVELS`.
 - Extended `TCB_t` and `StaticTask_t` with SRP metadata such as task preemption level, requested stack depth, SRP registry list item, declared resource claims, and currently held resources.
 - Added `xReadySRPTasksList_UP` as an EDF-ordered ready list for SRP tasks and `xSRPTaskRegistryList_UP` as the kernel registry for SRP task metadata and ceiling recomputation.
-- Overloaded the EDF `xTaskCreate()` path again in EDF + SRP mode so the caller can provide an SRP claim table and the kernel can validate claim IDs, reject duplicates, and derive the task's preemption level from its relative deadline.
+- Overloaded the EDF `xTaskCreate()` path again in EDF + SRP mode so the caller can provide an SRP claim table and the kernel can validate claim IDs, reject duplicates, and derive the task's preemption level from its relative deadline. This keeps SRP setup on the normal task-creation path instead of adding a separate SRP-only task API.
 - Added SRP ready-task selection logic so the scheduler scans the SRP ready list in deadline order and only chooses tasks that satisfy the current system-ceiling rule or are safe to resume while already holding resources.
-- Added `prvSRPRecomputeSystemCeiling()` so the per-resource blocking ceilings and the global `uxSystemCeiling` are recomputed whenever SRP task or resource state changes.
+- Added `prvSRPRecomputeSystemCeiling()` so the per-resource blocking ceilings and the global `uxSystemCeiling` are recomputed whenever SRP task or resource state changes. Recomputing the ceiling was chosen because it is clear, reliable for the project task sizes, and easier to validate than maintaining a more complicated ceiling-history structure.
 - Added `xTaskSRPAcquireResource()` and `xTaskSRPReleaseResource()` in the kernel task layer to maintain per-task held resources and global resource activity.
 - Added `xQueueSemaphoreTakeSRP()` and `xQueueSemaphoreGiveSRP()` in the queue/semaphore path so binary semaphores can participate in SRP accounting.
 - Added delete-time cleanup so any SRP resources still held by a task are released before the task leaves the system.

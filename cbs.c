@@ -88,6 +88,11 @@ CBS_Server_t * xCBSServerCreate(
         return NULL;
     }
 
+    if( xCBSAdmissionTest( xCapacityTicks, xPeriodTicks ) == pdFALSE )
+    {
+        return NULL;
+    }
+
     /* Allocate server struct */
     CBS_Server_t *pxNewServer = (CBS_Server_t *)pvPortMalloc( sizeof( CBS_Server_t ) );
     if( pxNewServer == NULL )

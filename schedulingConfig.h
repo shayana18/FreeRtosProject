@@ -1,17 +1,26 @@
 
-// Uniprocessing vs multiprocessing selection
-#define configUSE_UP  1U
+/* Scheduler extension selection.
+ *
+ * If every flag in this block is 0U, the EDF/SRP/CBS/MP extensions compile
+ * out and the kernel uses the stock FreeRTOS fixed-priority scheduler.
+ * configUSE_UP and configUSE_MP select the EDF execution model only when
+ * configUSE_EDF == 1U.
+ */
+#define configUSE_UP  0U
 #define configUSE_MP  0U
-// EDF selection (if not use stock FP implementation for UP and MP)
-#define configUSE_EDF 1U
+// EDF selection. If 0U, use the stock FreeRTOS fixed-priority scheduler.
+#define configUSE_EDF 0U
 // Uniprocessor scheduling config
-#define configUSE_SRP 1
+#define configUSE_SRP 0
 #define configUSE_CBS 0
 // MP scheduling config
 #define GLOBAL_EDF_ENABLE 0U
 #define PARTITIONED_EDF_ENABLE 0U
 // SRP stack sharing
 #define configUSE_SRP_SHARED_STACKS 0u
+/* Extra ticks a task may continue executing past its configured WCET before the
+ * WCET-overrun hook fires. Set to 0U to keep the original immediate threshold. */
+#define configEDF_WCET_OVERRUN_GRACE_TICKS 1U
 
 #if ( configUSE_UP == 1U ) && ( configUSE_MP == 1U )
     #error "configUSE_UP and configUSE_MP cannot both be enabled"
@@ -107,4 +116,10 @@
 
 #if ( configUSE_SRP_SHARED_STACKS != 0 ) && ( configUSE_SRP_SHARED_STACKS != 1U )
 	#error "configUSE_SRP_SHARED_STACKS must be either 0 or 1U"
+#endif
+
+/* Enables periodic SRP shared-stack usage reporting from test_utils.
+ * Set to 0U to compile out all SRP stack-report print calls in test code. */
+#ifndef configENABLE_TEST_SRP_STACK_REPORT
+	#define configENABLE_TEST_SRP_STACK_REPORT 1U
 #endif

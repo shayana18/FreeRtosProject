@@ -1,4 +1,4 @@
-#include "mp_tests/demo_tests/test_2_dhall.h"
+#include "mp_tests/global_edf_tests/test_dhall.h"
 
 #if ( ( configUSE_MP == 1 ) && ( configUSE_UP == 0 ) && ( configUSE_EDF == 1 ) && ( GLOBAL_EDF_ENABLE == 1U ) )
 
@@ -19,26 +19,7 @@
  * Task set:
  * - Heavy: T=2000 ms, C=1800 ms, D=T, unrestricted, tag 1   -> U = 0.90
  * - Light: T=2000 ms, C=200 ms,  D=T, unrestricted, tag 2   -> U = 0.10
- * - Bad  : T=2000 ms, C=300 ms,  D=T, unrestricted, tag 4   -> U = 0.15
- *
- * Total utilizations:
- * - accepted base set: 0.90 + 0.10 = 1.00
- * - with bad task:     1.15
- *
- * For m = 2, the implemented global EDF sufficient bound is:
- * - U_total <= m - ( m - 1 ) * U_max = 2 - 0.90 = 1.10
- *
- * Desired observations:
- * - The heavy and light tasks should be accepted and begin running.
- * - The final task should be rejected even though total utilization is still
- *   below 2.0, illustrating the Dhall-style conservative admission limit.
- * - If the final task were admitted anyway, the task set would contain one
- *   very heavy task and multiple light tasks with U_total = 1.15 and
- *   U_max = 0.90. This is exactly the kind of skewed utilization pattern that
- *   motivates the Dhall effect discussion: total utilization is far below the
- *   2-core capacity of 2.0, but global EDF no longer has a schedulability
- *   guarantee for the set because the single heavy task dominates U_max.
- * - Admission results are tracked through volatile variables rather than GPIO.
+ * - Bad  : T=4000 ms, C=3000 ms, D=3000 ms, unrestricted, tag 4 -> U = 0.75
  */
 
 #define DEMO_DHALL_STACK_DEPTH    256u
@@ -48,6 +29,7 @@ typedef struct MPDemoDhallTaskConfig
     const char * pcName;
     uint32_t ulTag;
     uint32_t ulPeriodMs;
+    uint32_t ulDeadlineMs;
     uint32_t ulWcetMs;
     uint32_t ulWorkMs;
 } MPDemoDhallTaskConfig_t;
@@ -81,13 +63,14 @@ static void vMPDemoDhallTask( void * pvParameters )
     }
 }
 
-void mp_demo_test_2_dhall_run( void )
+void mp_test_dhall_run( void )
 {
     static const MPDemoDhallTaskConfig_t xHeavyCfg =
     {
         .pcName = "Dhall Heavy",
         .ulTag = 1u,
         .ulPeriodMs = 2000u,
+        .ulDeadlineMs = 2000u,
         .ulWcetMs = 1800u,
         .ulWorkMs = 1600u
     };
@@ -96,6 +79,7 @@ void mp_demo_test_2_dhall_run( void )
         .pcName = "Dhall Light",
         .ulTag = 2u,
         .ulPeriodMs = 2000u,
+        .ulDeadlineMs = 2000u,
         .ulWcetMs = 200u,
         .ulWorkMs = 100u
     };
@@ -103,9 +87,10 @@ void mp_demo_test_2_dhall_run( void )
     {
         .pcName = "Dhall Bad",
         .ulTag = 4u,
-        .ulPeriodMs = 2000u,
-        .ulWcetMs = 300u,
-        .ulWorkMs = 150u
+        .ulPeriodMs = 4000u,
+        .ulDeadlineMs = 3000u,
+        .ulWcetMs = 3000u,
+        .ulWorkMs = 3000u
     };
     TaskHandle_t xHeavyHandle = NULL;
     TaskHandle_t xLightHandle = NULL;
@@ -123,7 +108,7 @@ void mp_demo_test_2_dhall_run( void )
                      &xHeavyHandle,
                      xHeavyCfg.ulPeriodMs,
                      xHeavyCfg.ulWcetMs,
-                     xHeavyCfg.ulPeriodMs,
+                     xHeavyCfg.ulDeadlineMs,
                      tskNO_AFFINITY );
 
     xMpDemoDhallLightCreateResult =
@@ -134,7 +119,7 @@ void mp_demo_test_2_dhall_run( void )
                      &xLightHandle,
                      xLightCfg.ulPeriodMs,
                      xLightCfg.ulWcetMs,
-                     xLightCfg.ulPeriodMs,
+                     xLightCfg.ulDeadlineMs,
                      tskNO_AFFINITY );
 
     xMpDemoDhallBadCreateResult =
@@ -145,7 +130,7 @@ void mp_demo_test_2_dhall_run( void )
                      &xBadHandle,
                      xBadCfg.ulPeriodMs,
                      xBadCfg.ulWcetMs,
-                     xBadCfg.ulPeriodMs,
+                     xBadCfg.ulDeadlineMs,
                      tskNO_AFFINITY );
 
     if( ( xMpDemoDhallHeavyCreateResult == pdPASS ) && ( xHeavyHandle != NULL ) )

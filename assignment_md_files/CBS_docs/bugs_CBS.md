@@ -1,26 +1,13 @@
-# CBS Bugs Log
+# CBS bugs and fixed issues
 
-## Resolved: TickType/layout mismatch between CBS and kernel task code
-Status: Fixed
+## Fixed issue: CBS/kernel layout mismatch
 
-### Symptom
-- CBS server fields appeared corrupted at runtime (for example, budget unexpectedly reading as zero).
-- The same `CBS_Server_t *` address showed different field offsets when inspected from `cbs.c` versus `tasks.c`.
+During CBS testing, server fields looked corrupted at runtime. For example, the same `CBS_Server_t *` appeared to have different field offsets when inspected from `cbs.c` and from `tasks.c`. That pointed to a cross-translation-unit layout mismatch rather than a normal scheduling bug.
 
-### Investigation path
-1. Added temporary cross-translation-unit sentinels (`sizeof`, `offsetof`, signatures) in both `cbs.c` and `tasks.c`.
-2. Confirmed compile-time disagreement on `CBS_Server_t` layout.
-3. Narrowed root cause to primitive-type width divergence (`TickType_t` path differed between translation units).
-4. Traced divergence to include order in `tasks.c` (early `portmacro.h` include before normal FreeRTOS include flow).
+The root cause was include order. `tasks.c` included `portmacro.h` too early, which sent it through a different FreeRTOS type path than `cbs.c`. As a result, primitive types such as `TickType_t` could be interpreted differently, which changed the layout of `CBS_Server_t`.
 
-### Root cause
-- `tasks.c` was entering a different preprocessor/type path than `cbs.c`, producing inconsistent type widths and therefore different struct packing/offsets.
+The fix was to remove the early `portmacro.h` include and restore the normal `FreeRTOS.h`-first include order. After that, `cbs.c` and `tasks.c` agreed on the CBS server layout, and the temporary layout-debug checks were removed.
 
-### Fix applied
-- Removed the early `portmacro.h` include in `tasks.c` and restored normal `FreeRTOS.h`-first include ordering.
-- Rebuilt and revalidated matching struct layout between translation units.
-- Removed all temporary layout-debug instrumentation afterward.
+## Current bugs
 
-### Current state
-- Issue is fixed.
-- CBS budget/deadline fields are interpreted consistently by both `cbs.c` and `tasks.c`.
+No current CBS bugs are documented within the CBS scope.

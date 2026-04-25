@@ -8,7 +8,7 @@
  *
  * Intended usage: call once from main(). This function does not return.
  */
-void mp_demo_test_1_part_run( void );
+void mp_compare_part_run( void );
 #else
-static inline void mp_demo_test_1_part_run( void ) {}
+static inline void mp_compare_part_run( void ) {}
 #endif

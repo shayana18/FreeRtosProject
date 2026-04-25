@@ -1,11 +1,11 @@
-# MP future work
+# MP future improvements
 
-- Add a dedicated MP test suite in the same style as `edf_tests`, with separate global EDF and partitioned EDF cases selectable from `main.c`.
-- Update `task_trace.c/h` for MP-specific per-core GPIO trace banks so both cores can be observed on hardware without shared-pin races.
-- Expand the partitioned EDF placement study beyond the current online first-fit-decreasing style placement and compare it against alternative heuristics such as best-fit.
-- Add longer-running global EDF stress tests that intentionally exercise migration, simultaneous releases, and repeated cross-core preemption.
-- Add longer-running partitioned EDF tests that repeatedly change task affinity at runtime to validate partition migration and registry movement over time.
-- Extend the MP admission study with additional edge cases near the sufficient bounds so the conservative nature of the implemented tests is clearly characterized.
-- If the project is extended beyond independent periodic tasks, decide whether shared-resource protocols should be integrated into MP EDF as well; the current MP design assumes tasks are independent.
-- Add a clearer user-facing description of the MP trace and test workflow to the top-level README once the first batch of MP tests has been committed.
-- Dynamic core hotplug is intentionally out of scope for the assignment, but would require port-level support and explicit scheduler semantics if the project were extended further.
+- Add less conservative or exact admission analysis for global EDF and partitioned EDF. The current tests are intentionally sufficient rather than exact, which keeps admission safe but rejects some feasible task sets.
+- Add automated trace checking for MP GPIO captures so the expected core/task schedule can be compared against recorded logic-analyzer data instead of relying only on manual inspection.
+- Add longer-running stress tests for global EDF that repeatedly exercise simultaneous releases, migration, job migration after preemption, and cross-core preemption targeting.
+- Add longer-running partitioned EDF tests that repeatedly change affinity at runtime to validate partition migration and registry movement over many jobs.
+- Add instrumentation to measure MP scheduler overhead, especially shared ready-list scanning in global EDF and migration cost in partitioned EDF.
+- Add optional debug reporting for admission decisions, including total utilization, maximum task utilization, selected partition, and rejection reason.
+- Extend MP EDF beyond independent tasks by deciding how resource sharing should interact with global and partitioned EDF. The current MP mode intentionally does not integrate SRP or inter-task communication.
+- Investigate more partition-placement heuristics, such as worst-fit, next-fit, and offline first-fit decreasing, and compare them against the current online best-fit implementation.
+- Consider dynamic core hotplug only if the project is extended beyond the assignment. It would require port-level support and explicit scheduler semantics for stopping, restarting, and rebalancing cores.
