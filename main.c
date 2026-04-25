@@ -14,7 +14,6 @@
             #include "cbs_tests/test_2.h"
             #include "cbs_tests/test_3.h"
             #include "cbs_tests/test_4.h"
-            #include "cbs_tests/test_5.h"
         #elif ( configUSE_SRP == 0 )
             #include "edf_tests/test_1.h"
             #include "edf_tests/test_2.h"
@@ -107,19 +106,17 @@ int main( void )
     #if ( configUSE_EDF == 1 )
         #if ( ( configUSE_UP == 1 ) && ( configUSE_MP == 0 ) )
             #if ( configUSE_CBS == 1 )
-            // Simple cbs test with one periodic EDF task and one CBS-managed aperiodic task.
-            // cbs_1_run();
             // Multiple CBS server test with two periodic tasks plus two CBS-managed aperiodic tasks.
-            // cbs_2_run();
+            // cbs_1_run();
             // Single-server CBS deadline-transition test:
         // sparse arrival forces deadline = arrival + T (non-multiple), then frequent jobs drain
         // budget and force deadline = current_deadline + T on exhaustion.
-        // cbs_3_run();
+        // cbs_2_run();
         // One CBS server with four aperiodic job-source tasks; asserts CBS wins
         // tie-break against periodic task on equal deadlines.
-        // cbs_4_run();
+        // cbs_3_run();
         // Periodic EDF overrun/deadline-miss test with a CBS server active in the background.
-        cbs_5_run();
+        cbs_4_run();
         #elif ( configUSE_SRP == 1 )
             // srp_1_run();
             // SRP shared-resource ordering test.

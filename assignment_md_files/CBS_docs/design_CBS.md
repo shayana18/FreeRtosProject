@@ -39,6 +39,20 @@ The main benefits of this split are:
 - `vCBSInit()`, `vCBSDeinit()`, `xCBSIsTaskManaged(task)`: subsystem lifecycle/query.
 - `xTaskCreateCBSWorker(...)`, `xTaskCreateCBS(...)` (when SRP is off): create and bind CBS workers.
 
+## CBS scheduling rules used
+
+The server state follows the notation `Q/T`: `Q` is the budget/capacity and `T` is the server period. Each server also tracks a dynamic absolute deadline and remaining budget. The worker task's EDF deadline is kept equal to the server deadline, so regular periodic tasks and CBS workers can share the same EDF ready list.
+
+On job arrival, `xCBSSubmitJob()` applies the CBS idle-arrival rule. If the server is already past its deadline, or if the remaining budget is too large for the time left before the current deadline, the server is refreshed and its deadline becomes `arrival + T`. In code this is checked without floating point by comparing:
+
+```c
+remaining_budget * period >= (deadline - arrival) * capacity
+```
+
+While a CBS-managed worker runs, the scheduler tick charges budget to the bound server. When the budget reaches zero, the server budget is refreshed, the server deadline is postponed by one period, and the worker's position in the EDF ready list is refreshed. This is why CBS over-budget execution does not use the deadline-miss GPIO: budget exhaustion is expected CBS behavior, not a hard periodic deadline miss.
+
+Equal-deadline behavior has two pieces. During normal ready-task selection, if several ready tasks have the same absolute deadline, a CBS-managed task is selected first to satisfy the assignment tie-break requirement. For preemption checks, the implementation avoids repeatedly forcing a currently running periodic task out solely because a CBS task arrived with the exact same deadline; this keeps the explicit ready-selection tie rule while reducing unnecessary churn.
+
 ## Kernel integration points
 Implemented through small task-layer APIs in `task.h`/`tasks.c`:
 - `xTaskCBSBindToServer`, `xTaskCBSUnbindFromServer`, `xTaskCBSIsManaged`
@@ -64,3 +78,5 @@ TCB extensions for CBS-enabled EDF builds:
 - Admission control uses a simple utilization test. This was chosen because the utilization test is easy to validate and fits the project scope.
 - Each worker has at most one outstanding job. This matches the assignment simplification that a new job is not released until the previous job of the same task is complete.
 - CBS is compiled only with EDF enabled because CBS relies on dynamic server deadlines to participate in EDF scheduling.
+- CBS and SRP are mutually exclusive in this project configuration. CBS focuses on aperiodic service reservations, while SRP owns resource-ceiling behavior.
+- `configCBS_MAX_SERVERS` bounds the number of concurrent CBS servers. The current tests use up to two servers, but the server table is designed for a small bounded embedded configuration rather than unbounded dynamic server creation.

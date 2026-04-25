@@ -17,4 +17,8 @@ At runtime, EDF still gives the primary ordering: the scheduler scans ready task
 
 Resource ceilings and the system ceiling are recomputed when SRP resources are acquired or released through the SRP semaphore wrappers. Recomputing is simple and defensible for this project because the resource set is statically declared at task creation time, and correctness is more important than saving a few cycles in the ceiling update path.
 
+Admission control extends the EDF checks with SRP blocking information from the declared resource claim table. Each claim includes the resource ID and maximum critical-section length. For implicit-deadline task sets, the utilization-style check includes a blocking contribution. For constrained-deadline task sets, the demand analysis includes a single SRP blocking term at candidate intervals. This is the path exercised by the SRP admission test where a task that would pass plain EDF utilization is rejected once blocking is considered.
+
 The optional shared-stack mode uses the SRP property that tasks at the same preemption level cannot require separate run-time stack regions at the same time. The kernel reserves one shared region per preemption level, sized for the largest task at that level. The current implementation uses a static layout, which matches the assignment's focus on measuring stack savings for a known task set.
+
+SRP semaphore use is intentionally explicit. Application code uses the SRP binary semaphore wrappers so the kernel can update held-resource state at the same time the semaphore is taken or given. This keeps resource ownership, system-ceiling recomputation, and deadline-miss cleanup in one consistent path.

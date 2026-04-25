@@ -37,8 +37,10 @@
 - `T3 -> 4`
 
 #### Expected
-- The earliest eligible task should run first.
-- SRP ceilings should prevent resource-induced inversion.
+- With synchronous release at `t=0s`, EDF should select the earliest absolute deadline first: `T1` before `T2` before `T3`.
+- `T1` should run uninterrupted for its `R1` critical section and non-critical work, then block until its next period.
+- `T2` should then run uninterrupted through its `R1` and `R2` critical sections, followed by `T3` through its non-critical work and `R2` critical section.
+- Later releases should follow the same EDF timing as the equivalent no-contention EDF schedule; SRP resource acquisition and system-ceiling tracking should not add extra preemptions in this test.
 - No deadline misses should occur over the observed interval.
 
 #### Measured Waveform
@@ -46,6 +48,11 @@
 
 #### Expected Waveform
 ![Test 1 SRP Non-Stack Sharing Answer](<../test_assets/SRP Tests/Non-Stack Sharing/Test 1/Test 1 SRP Non-Stack Sharing Answer.png>)
+
+#### Result Analysis
+- The measured waveform matches the expected uninterrupted runs for `T1`, `T2`, and `T3`.
+- EDF scheduling is unchanged for this task set because there is no deadline-based contention that should force a preemption inside the observed jobs.
+- SRP behavior is still exercised because the tasks acquire and release `R1`/`R2`, updating the system ceiling while preserving the expected EDF order.
 
 ### Test 3 - SRP Admission with Blocking Terms
 #### Test Implementation
@@ -120,7 +127,8 @@
 - `T6 -> 32`
 
 #### Expected
-- TheAt `~t=5s`, a shorter-deadline constrained task (T6) should be released has a earlier deadline than the currently running task (T5). But since T5 and T6 share a resource and T5 acquired the resource just before T6 released, T6 should remain blocked while the SRP ceiling is active.
+- At about `t=5s`, the shorter-deadline constrained task `T6` should release with an earlier deadline than the currently running task `T5`.
+- Because `T5` and `T6` share `R1`, and `T5` acquired `R1` just before `T6` released, `T6` should remain blocked while the SRP ceiling is active.
 - It should only run once the conflicting resource is released.
 
 #### Measured Waveform

@@ -2,7 +2,7 @@
 
 #include "FreeRTOS.h"
 
-#if ( ( configUSE_EDF == 1 ) && ( configUSE_CBS == 1 ) && ( configUSE_SRP == 0 ) )
+#if ( ( configUSE_UP == 1 ) && ( configUSE_EDF == 1 ) && ( configUSE_CBS == 1 ) && ( configUSE_SRP == 0 ) )
 
 #include <stdint.h>
 
@@ -11,92 +11,62 @@
 #include "task.h"
 #include "cbs.h"
 
-#include "test_utils.h"
 #include "task_trace.h"
+#include "test_utils.h"
 
-/* Larger scales for easier tracing. */
-#define CBS4_SERVER_PERIOD_MS            7000u
-#define CBS4_SERVER_BUDGET_MS            2200u
-#define CBS4_PERIODIC_PERIOD_MS          7000u
-#define CBS4_PERIODIC_WORK_MS            1200u
-#define CBS4_APERIODIC_WORK_MS            900u
-#define CBS4_TIE_TASK_REL_DEADLINE_MS     100u
+/*
+ * CBS Test 4:
+ * - One normal periodic EDF task intentionally exceeds both WCET and deadline.
+ * - One CBS server/worker pair runs short background jobs that stay within the
+ *   reserved server budget.
+ *
+ * The goal is to confirm that ordinary periodic overrun and deadline-miss
+ * handling still works correctly when CBS support is enabled.
+ */
 
-/* Observation window after tie-trigger submission. */
-#define CBS4_TIE_OBSERVE_MS               120u
+#define CBS4_STACK_DEPTH                256u
 
-#define CBS4_PERIODIC_STACK_WORDS         256u
-#define CBS4_WORKER_STACK_WORDS           256u
-#define CBS4_ARRIVAL_STACK_WORDS          220u
+#define CBS4_PERIODIC_PERIOD_MS        6000u
+#define CBS4_PERIODIC_DEADLINE_MS      1800u
+#define CBS4_PERIODIC_WCET_MS           700u
+#define CBS4_PERIODIC_WORK_MS          2200u
 
-#define CBS4_WINNER_NONE                    0u
-#define CBS4_WINNER_PERIODIC                1u
-#define CBS4_WINNER_CBS                     2u
+#define CBS4_SERVER_PERIOD_MS          5000u
+#define CBS4_SERVER_BUDGET_MS          1200u
+#define CBS4_SERVER_JOB_WORK_MS         350u
+#define CBS4_SERVER_JOB_PERIOD_MS      5000u
+#define CBS4_SERVER_JOB_OFFSET_MS      1000u
+#define CBS4_SOURCE_DEADLINE_MS         100u
 
-static volatile uint32_t ulCBS4PeriodicBeats;
-static volatile uint32_t ulCBS4AperiodicJobsDone;
-static volatile uint32_t ulCBS4SubmitFailures;
+#define CBS4_TRACE_PERIODIC              1u
+#define CBS4_TRACE_SERVER                2u
+#define CBS4_TRACE_SOURCE                4u
 
-static volatile TickType_t xCBS4PeriodicAnchorTick;
-static volatile BaseType_t xCBS4TieWindowOpen;
-static volatile uint32_t ulCBS4TieWinner;
-static volatile uint32_t ulCBS4TieAttempts;
-static volatile uint32_t ulCBS4TieCBSWins;
+static CBS_Server_t * pxCBS4Server = NULL;
+static TaskHandle_t xCBS4PeriodicHandle = NULL;
+static TaskHandle_t xCBS4WorkerHandle = NULL;
+static TaskHandle_t xCBS4SourceHandle = NULL;
+static TickType_t xCBS4AnchorTick = 0u;
 
-static TaskHandle_t xCBS4PeriodicHandle;
-static TaskHandle_t xCBS4WorkerHandle;
-static TaskHandle_t xCBS4TieArrivalHandle;
-static CBS_Server_t * pxCBS4Server;
+static volatile uint32_t ulCBS4PeriodicReleases = 0u;
+static volatile uint32_t ulCBS4ServerJobsCompleted = 0u;
+static volatile uint32_t ulCBS4ServerSubmitFailures = 0u;
 
-static BaseType_t prvCBS4TrySubmit( void )
+static void vCBS4PeriodicOverrunTask( void * pvParameters )
 {
-    if( ( pxCBS4Server != NULL ) && ( xCBS4WorkerHandle != NULL ) )
-    {
-        if( xCBSSubmitJob( pxCBS4Server, xCBS4WorkerHandle ) == pdPASS )
-        {
-            return pdPASS;
-        }
-
-        ulCBS4SubmitFailures++;
-    }
-
-    return pdFAIL;
-}
-
-static void vCBS4PeriodicTask( void * pvParameters )
-{
-    TickType_t xLastWake;
-    TickType_t xPeriodicReleaseCount = ( TickType_t ) 0U;
+    TickType_t xLastWakeTime = xCBS4AnchorTick;
 
     ( void ) pvParameters;
-    xLastWake = xTaskGetTickCount();
-
-    if( xCBS4PeriodicAnchorTick == ( TickType_t ) 0U )
-    {
-        xCBS4PeriodicAnchorTick = xLastWake;
-
-        if( xCBS4TieArrivalHandle != NULL )
-        {
-            ( void ) xTaskNotifyGive( xCBS4TieArrivalHandle );
-        }
-    }
 
     for( ;; )
     {
-        if( ( xCBS4TieWindowOpen != pdFALSE ) && ( ulCBS4TieWinner == CBS4_WINNER_NONE ) )
-        {
-            ulCBS4TieWinner = CBS4_WINNER_PERIODIC;
-        }
-
+        ulCBS4PeriodicReleases++;
         spin_ms( CBS4_PERIODIC_WORK_MS );
-        ulCBS4PeriodicBeats++;
-        ( void ) xTaskDelayUntil( &xLastWake, pdMS_TO_TICKS( CBS4_PERIODIC_PERIOD_MS ) );
-        xPeriodicReleaseCount++;
 
-        vTraceUsbPrint( "CBS4_PER deadline update: release=%lu now=%lu next_deadline~=%lu\r\n",
-                        ( unsigned long ) xPeriodicReleaseCount,
-                        ( unsigned long ) xTaskGetTickCount(),
-                        ( unsigned long ) ( xLastWake + pdMS_TO_TICKS( CBS4_PERIODIC_PERIOD_MS ) ) );
+        if( xTaskDelayUntil( &xLastWakeTime, pdMS_TO_TICKS( CBS4_PERIODIC_PERIOD_MS ) ) == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
     }
 }
 
@@ -108,125 +78,97 @@ static void vCBS4WorkerTask( void * pvParameters )
     {
         if( xCBSWaitForJob( portMAX_DELAY ) == pdTRUE )
         {
-            if( ( xCBS4TieWindowOpen != pdFALSE ) && ( ulCBS4TieWinner == CBS4_WINNER_NONE ) )
-            {
-                ulCBS4TieWinner = CBS4_WINNER_CBS;
-            }
+            spin_ms( CBS4_SERVER_JOB_WORK_MS );
+            ulCBS4ServerJobsCompleted++;
+            configASSERT( xCBSCompleteJob() == pdPASS );
 
-            spin_ms( CBS4_APERIODIC_WORK_MS );
-            ulCBS4AperiodicJobsDone++;
-            ( void ) xCBSCompleteJob();
+            vTraceFlushWcetOverrunEvents();
+            vTraceFlushDeadlineMissEvents();
         }
     }
 }
 
-static void vCBS4TieArrivalTask( void * pvParameters )
+static void vCBS4SourceTask( void * pvParameters )
 {
-    TickType_t xLastWake;
-    TickType_t xTieReleaseCount = ( TickType_t ) 0U;
+    TickType_t xLastWakeTime = xCBS4AnchorTick;
 
     ( void ) pvParameters;
 
-    /* Wait until the periodic task sets the common release anchor. */
-    ( void ) ulTaskNotifyTake( pdTRUE, portMAX_DELAY );
-
-    /* Lock tie arrivals to the same period anchor as the periodic task so the
-     * first arrival and subsequent arrivals share release/deadline phase. */
-    xLastWake = xCBS4PeriodicAnchorTick;
-
     for( ;; )
     {
-        ( void ) xTaskDelayUntil( &xLastWake, pdMS_TO_TICKS( CBS4_SERVER_PERIOD_MS ) );
-        ulCBS4TieAttempts++;
+        if( ( pxCBS4Server != NULL ) && ( xCBS4WorkerHandle != NULL ) )
+        {
+            if( xCBSSubmitJob( pxCBS4Server, xCBS4WorkerHandle ) == pdFAIL )
+            {
+                ulCBS4ServerSubmitFailures++;
+            }
+        }
 
-        ulCBS4TieWinner = CBS4_WINNER_NONE;
-        xCBS4TieWindowOpen = pdTRUE;
+        vTraceFlushWcetOverrunEvents();
+        vTraceFlushDeadlineMissEvents();
+        vTraceUsbPrint( "[CBS4] periodic_releases=%lu server_jobs=%lu submit_failures=%lu server_deadline=%lu\r\n",
+                        ( unsigned long ) ulCBS4PeriodicReleases,
+                        ( unsigned long ) ulCBS4ServerJobsCompleted,
+                        ( unsigned long ) ulCBS4ServerSubmitFailures,
+                        ( unsigned long ) ( ( pxCBS4Server != NULL ) ? pxCBS4Server->xAbsDeadline : 0u ) );
 
-        configASSERT( prvCBS4TrySubmit() == pdPASS );
-        xTieReleaseCount++;
-        vTraceUsbPrint( "CBS4_TIE deadline update: release=%lu now=%lu next_deadline~=%lu\r\n",
-                ( unsigned long ) xTieReleaseCount,
-                ( unsigned long ) xTaskGetTickCount(),
-                ( unsigned long ) ( xLastWake + pdMS_TO_TICKS( CBS4_SERVER_PERIOD_MS ) ) );
-
-        vTaskDelay( pdMS_TO_TICKS( CBS4_TIE_OBSERVE_MS ) );
-
-        /* At equal deadlines, CBS must win tie-break over periodic EDF tasks. */
-        configASSERT( ulCBS4TieWinner == CBS4_WINNER_CBS );
-        ulCBS4TieCBSWins++;
-
-        xCBS4TieWindowOpen = pdFALSE;
+        if( xTaskDelayUntil( &xLastWakeTime, pdMS_TO_TICKS( CBS4_SERVER_JOB_PERIOD_MS ) ) == pdFALSE )
+        {
+            xLastWakeTime = xTaskGetTickCount();
+        }
     }
 }
 
 void cbs_4_run( void )
 {
-    BaseType_t xCreateResult;
-
-    xCBS4PeriodicHandle = NULL;
-    xCBS4WorkerHandle = NULL;
-    xCBS4TieArrivalHandle = NULL;
-    pxCBS4Server = NULL;
-
-    ulCBS4PeriodicBeats = 0u;
-    ulCBS4AperiodicJobsDone = 0u;
-    ulCBS4SubmitFailures = 0u;
-    xCBS4PeriodicAnchorTick = 0u;
-    xCBS4TieWindowOpen = pdFALSE;
-    ulCBS4TieWinner = CBS4_WINNER_NONE;
-    ulCBS4TieAttempts = 0u;
-    ulCBS4TieCBSWins = 0u;
-
     stdio_init_all();
     vTraceTaskPinsInit();
+
+    pxCBS4Server = NULL;
+    xCBS4PeriodicHandle = NULL;
+    xCBS4WorkerHandle = NULL;
+    xCBS4SourceHandle = NULL;
+    ulCBS4PeriodicReleases = 0u;
+    ulCBS4ServerJobsCompleted = 0u;
+    ulCBS4ServerSubmitFailures = 0u;
+
+    xCBS4AnchorTick = xTaskGetTickCount();
 
     pxCBS4Server = xCBSServerCreate( pdMS_TO_TICKS( CBS4_SERVER_BUDGET_MS ),
                                      pdMS_TO_TICKS( CBS4_SERVER_PERIOD_MS ),
                                      "CBS4" );
     configASSERT( pxCBS4Server != NULL );
 
-    xCreateResult = xTaskCreate( vCBS4PeriodicTask,
-                                 "CBS4_PER",
-                                 CBS4_PERIODIC_STACK_WORDS,
-                                 NULL,
-                                 &xCBS4PeriodicHandle,
-                                 CBS4_PERIODIC_PERIOD_MS,
-                                 CBS4_PERIODIC_WORK_MS,
-                                 CBS4_PERIODIC_PERIOD_MS );
-    configASSERT( xCreateResult == pdPASS );
+    configASSERT( xTaskCreate( vCBS4PeriodicOverrunTask,
+                               "CBS4_PER",
+                               CBS4_STACK_DEPTH,
+                               NULL,
+                               &xCBS4PeriodicHandle,
+                               CBS4_PERIODIC_PERIOD_MS,
+                               CBS4_PERIODIC_WCET_MS,
+                               CBS4_PERIODIC_DEADLINE_MS ) == pdPASS );
 
-    xCreateResult = xTaskCreateCBSWorker( vCBS4WorkerTask,
-                                          "CBS4_APER",
-                                          CBS4_WORKER_STACK_WORDS,
-                                          NULL,
-                                          &xCBS4WorkerHandle,
-                                          pxCBS4Server );
-    configASSERT( xCreateResult == pdPASS );
+    configASSERT( xTaskCreateCBSWorker( vCBS4WorkerTask,
+                                        "CBS4_APER",
+                                        CBS4_STACK_DEPTH,
+                                        NULL,
+                                        &xCBS4WorkerHandle,
+                                        pxCBS4Server ) == pdPASS );
 
-    xCreateResult = xTaskCreate( vCBS4TieArrivalTask,
-                                 "CBS4_TIE",
-                                 CBS4_ARRIVAL_STACK_WORDS,
-                                 NULL,
-                                 &xCBS4TieArrivalHandle,
-                                 CBS4_SERVER_PERIOD_MS,
-                                 20u,
-                                 CBS4_TIE_TASK_REL_DEADLINE_MS );
-    configASSERT( xCreateResult == pdPASS );
+    configASSERT( xTaskCreate( vCBS4SourceTask,
+                               "CBS4_SRC",
+                               CBS4_STACK_DEPTH,
+                               NULL,
+                               &xCBS4SourceHandle,
+                               CBS4_SERVER_JOB_PERIOD_MS,
+                               50u,
+                               CBS4_SOURCE_DEADLINE_MS ) == pdPASS );
 
-    if( xCBS4PeriodicHandle != NULL )
-    {
-        vTaskSetApplicationTaskTag( xCBS4PeriodicHandle, ( TaskHookFunction_t ) 1 );
-    }
+    vTaskSetApplicationTaskTag( xCBS4PeriodicHandle, ( TaskHookFunction_t ) CBS4_TRACE_PERIODIC );
+    vTaskSetApplicationTaskTag( xCBS4WorkerHandle, ( TaskHookFunction_t ) CBS4_TRACE_SERVER );
+    vTaskSetApplicationTaskTag( xCBS4SourceHandle, ( TaskHookFunction_t ) CBS4_TRACE_SOURCE );
 
-    if( xCBS4WorkerHandle != NULL )
-    {
-        vTaskSetApplicationTaskTag( xCBS4WorkerHandle, ( TaskHookFunction_t ) 2 );
-    }
-
-    if( xCBS4TieArrivalHandle != NULL )
-    {
-        vTaskSetApplicationTaskTag( xCBS4TieArrivalHandle, ( TaskHookFunction_t ) 4 );
-    }
+    vTraceUsbPrint( "[CBS4] periodic task should overrun WCET and miss its deadline; CBS worker should keep completing short jobs\r\n" );
 
     vTaskStartScheduler();
 

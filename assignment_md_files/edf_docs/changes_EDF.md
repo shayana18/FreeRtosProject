@@ -18,3 +18,5 @@
 - Updated `xTaskIncrementTick()` so the currently running EDF task accumulates execution time each tick.
 - Added WCET and deadline handling in `xTaskIncrementTick()` so the running task reports a WCET overrun when it is still executing at its WCET boundary, while only a real deadline miss advances the job to its next release and delays the task.
 - Removed EDF tasks from the EDF registry list when they are deleted.
+- Used wrap-safe tick comparisons for deadline checks so long-running tests are not affected by tick counter wraparound.
+- Suspended scheduling around runtime admission checks so the task registry snapshot is stable while a new EDF task is being accepted or rejected.

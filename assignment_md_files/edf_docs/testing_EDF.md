@@ -65,7 +65,7 @@ Measured waveform:
 
 #### Expected
 - At `t=0s`, all jobs are released and Task 1 (earliest absolute deadline) starts first.
-- After running for it's designated `Wcet = 1500ms`, it is followed by Task 2 and then 3 for their respective `Wcet`s.
+- After running for its designated `WCET = 1500ms`, it is followed by Task 2 and then 3 for their respective `WCET`s.
 - At `t=10s`, J<sub>1,3</sub> arrives and has deadline of `15s` while the current running J<sub>3,2</sub> has a deadline of `16s`. Therefore J<sub>1,3</sub> will preempt the current running job.
 - Tasks that can run as soon as they arrive have correct period over which they are submitted again.
 - Current running task is also preempted by Task 1 at `t=15s` and `t=25s` for similar reasons. 
@@ -111,7 +111,7 @@ Measured waveform:
 - The tasks will execute in forming a "symmetric" pattern on the waveform due to the harmonic periods.
 
 #### Actual
-- As can be seen from the logic analyzer waveform, the described symmetric pattern can be observed. Note that the small pulses that can be seen intermitently is an artifact of small amounts of jitter since we are spinning in each task for it's full WCET.
+- As can be seen from the logic analyzer waveform, the described symmetric pattern can be observed. Note that the small pulses that can be seen intermittently are an artifact of small amounts of jitter since each task spins for its full WCET.
 
 #### Verified
 - EDF was enabled via configuration and the kernel executed EDF periodic dispatch instead of fixed-priority dispatch.
@@ -155,8 +155,8 @@ Measured waveform:
 - Baseline tasks should continue their periodic pattern across `0s-10s` and after `10s`, showing runtime task creation does not stall scheduler progress.
 
 #### Actual
-- Initial bad admission return: We can see the bad candidate was unable to be created  at startup since we do not see a task id on the waveform that corresponds to the bad candidate.
-- Delayed bad admission return: Though the timing is a bit skewed to to previously mentioned limitations, it can be seen from the waveform that the bad candidate was not able to be created at `t=15s` since there is no corresponding task id on the trace pins after that time.
+- Initial bad admission return: The bad candidate was unable to be created at startup because no task ID corresponding to the bad candidate appears on the waveform.
+- Delayed bad admission return: Though the timing is skewed by the controller's long deadline, the waveform shows that the bad candidate was still not created at about `t=15s` because no corresponding task ID appears on the trace pins after that time.
 - Delayed good admission return: We can see that the good candidate was created at around `t=15s` since we see the corresponding task id on the trace pins from that point onward. 
 
 #### Verified
@@ -196,7 +196,7 @@ Measured waveform:
 - At `t=5s`, T1 releases again (deadline `8s`), and at `t=7s`, T2 releases again (deadline `10.5s`); trace ordering should reflect deadline-based arbitration, not just period size.
 - At `t=10s`, T1 and T3 both release; T1's earlier deadline (`13s`) should place it ahead of T3 (`18s`) when both contend.
 - No deadline-miss pulse is expected over the observed schedule window.
-- At `t=14s` T2 releases again and starts executing. `t=15s`, T1 release again while T2 is not finished executing; T1's deadline (`18s`) should place it after deadline of T2 (`17.5s`). So based on this, T1 should not preempt T2 at `t=15s` and should only start executing after T2 finishes at around `t=17.5s`.
+- At `t=14s`, T2 releases again and starts executing. At `t=15s`, T1 releases again while T2 is not finished executing; T1's deadline (`18s`) is later than T2's deadline (`17.5s`). Therefore, T1 should not preempt T2 at `t=15s` and should only start executing after T2 finishes at around `t=17.5s`.
 
 #### Actual
 - We can see from the waveform that as described in what was expected, T1 does not preempt T2 at `t=15s` and only starts executing after T2 finishes at around `t=17.5s`. This shows that the scheduler is correctly prioritizing based on absolute deadlines rather than just periods.
@@ -238,10 +238,10 @@ Measured waveform:
 - At `t=0s`, all tasks release with deadlines `3s`, `5s`, `7s`, and `10s`; initial order should prioritize T1 then T2 before later-deadline jobs.
 - Around `t=4s`, a new T1 job arrives (deadline `7s`) while longer jobs are active, so an earlier-deadline takeover/preemption is expected.
 - Around `t=6s` and `t=8s`, additional T2/T1 releases create repeated reorder points; trace should show deadline-based re-selection at these boundaries.
-- At `t=18s`T3 releases again with deadline `25s`, however it cannot execute until T2 finishes at around `t=19s`. T3 is expected ot run until `t=20s` when T1 is released with deadline `23s` and preempts T3. T1 should then run until it finishes at around `t=22s` and then T3 should resume and finish at around `t=25s`.
+- At `t=18s`, T3 releases again with deadline `25s`; however, it cannot execute until T2 finishes at around `t=19s`. T3 is expected to run until `t=20s`, when T1 is released with deadline `23s` and preempts T3. T1 should then run until it finishes at around `t=22s`, after which T3 should resume and finish at around `t=25s`.
 
 #### Actual
-- As can be seen from the waaveform, T3 releases at `t=18s` but cannot execute until T2 finishes at around `t=19s`. T3 then runs until `t=20s` when T1 is released with deadline `23s` and preempts T3. T1 then runs until it finishes at around `t=22s` and then T3 resumes and finishes at around `t=25s`. This shows that the scheduler is correctly handling the complex interplay of releases, deadlines, and preemptions in this higher-utilization constrained-deadline scenario.
+- As can be seen from the waveform, T3 releases at `t=18s` but cannot execute until T2 finishes at around `t=19s`. T3 then runs until `t=20s` when T1 is released with deadline `23s` and preempts T3. T1 then runs until it finishes at around `t=22s`, and then T3 resumes and finishes at around `t=25s`. This shows that the scheduler is correctly handling the complex interplay of releases, deadlines, and preemptions in this higher-utilization constrained-deadline scenario.
 
 #### Verified
 - Constrained-deadline EDF remained stable under higher utilization with expected reorder/preemption behavior.
@@ -280,9 +280,9 @@ Measured waveform:
 - After scheduler start, only baseline + accepted-good tasks should appear in trace; rejected-bad task should never execute.
 
 #### Actual
--
-- Bad admission return:
-- Good admission return:
+- Bad admission return: The bad constrained-deadline candidate does not appear on the trace pins, including the reserved bad-candidate tag `8`, so it was rejected before it could enter the schedule.
+- Good admission return: The good candidate appears with trace ID `4` alongside the two baseline tasks, showing that the relaxed-deadline version was accepted and scheduled.
+- The waveform therefore matches the intended reject-then-accept constrained admission-control behavior.
 
 #### Verified
 - Admission control correctly distinguished failing vs passing constrained-deadline candidates at creation time.

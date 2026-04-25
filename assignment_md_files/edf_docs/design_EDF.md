@@ -21,4 +21,8 @@ Admission control depends on the task set:
 - implicit-deadline task sets use the standard EDF utilization test
 - constrained-deadline task sets use processor-demand analysis
 
+Runtime task creation uses the same admission checks as startup task creation. When a task is created after the scheduler has started, the scheduler is temporarily suspended so the admission test sees a stable snapshot of the existing EDF task registry. If the candidate is accepted, it is inserted into the registry and ready list with its release/deadline metadata initialized; if not, creation fails before the task can appear in the runtime trace.
+
+WCET overruns and deadline misses are intentionally separated. A WCET overrun reports diagnostic output but does not by itself skip the job. A deadline miss is the stronger event: the miss hook and GPIO indicator fire, the current job is advanced to its next release, and the task is delayed so other ready work can continue.
+
 This keeps the Task 1 implementation focused on the required EDF behavior: deadline-ordered dispatch, admission control, runtime task creation, and deadline-miss/overrun handling.

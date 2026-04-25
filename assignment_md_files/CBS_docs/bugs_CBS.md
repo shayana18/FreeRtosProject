@@ -10,4 +10,4 @@ The fix was to remove the early `portmacro.h` include and restore the normal `Fr
 
 ## Current bugs
 
-No current CBS bugs are documented within the Task 3 scope.
+No current CBS bugs are documented within the CBS scope.
