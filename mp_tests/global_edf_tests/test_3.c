@@ -21,6 +21,7 @@
  * - Blocker B0: pinned to core 0, T=5000 ms, C=2500 ms, D=T, initial delay 0 ms, tag 2
  * - Blocker B1: pinned to core 1, T=5000 ms, C=2500 ms, D=T, initial delay 2000 ms, tag 4
  *
+ */
 
 #define GLOB3_STACK_DEPTH     256u
 

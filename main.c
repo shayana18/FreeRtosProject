@@ -155,7 +155,7 @@ int main( void )
             // edf_9_run();
             #endif
         #elif ( ( configUSE_MP == 1 ) && ( configUSE_UP == 0 ) )
-            #if ( GLOBAL_EDF_ENABLE == 1U )
+            #if ( PARTITIONED_EDF_ENABLE == 0U ) // default to global EDF when partitioing not selected
             // Global EDF basic dispatch: two earliest-deadline jobs should occupy the two cores.
             // mp_global_edf_1_run();
 
@@ -171,7 +171,7 @@ int main( void )
             // mp_compare_glob_run();
             mp_test_dhall_run();
 
-            #else
+            #elif (PARTITIONED_EDF_ENABLE == 1U)
             // Partitioned EDF basic: tasks should only appear on their assigned core bank.
             // mp_partitioned_edf_1_run();
 
