@@ -1,6 +1,6 @@
 # SRP kernel changes
 
-- Added SRP configuration flags in `schedulingConfig.h`, including `configUSE_SRP`, `configSRP_RESOURCE_TYPE_COUNT`, `configUSE_SRP_SHARED_STACKS`, `configSRP_SHARED_STACK_SIZE`, `configSRP_SHARED_STACK_GUARD_WORDS`, and `configSRP_SHARED_STACK_MAX_LEVELS`.
+- Added SRP configuration flags in `schedulingConfig.h`, including `configUSE_SRP`, `configSRP_RESOURCE_TYPE_COUNT`, `configUSE_SRP_SHARED_STACKS`, `configSRP_STACK_POOL`, `configSRP_SHARED_STACK_GUARD_WORDS`, and `configSRP_SHARED_STACK_MAX_LEVELS`.
 - Extended `TCB_t` and `StaticTask_t` with SRP metadata such as task preemption level, requested stack depth, SRP registry list item, declared resource claims, and currently held resources.
 - Added `xReadySRPTasksList_UP` as an EDF-ordered ready list for SRP tasks and `xSRPTaskRegistryList_UP` as the kernel registry for SRP task metadata and ceiling recomputation.
 - Overloaded the EDF `xTaskCreate()` path again in EDF + SRP mode so the caller can provide an SRP claim table and the kernel can validate claim IDs, reject duplicates, and derive the task's preemption level from its relative deadline. This keeps SRP setup on the normal task-creation path instead of adding a separate SRP-only task API.

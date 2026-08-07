@@ -6,12 +6,12 @@
  * configUSE_UP and configUSE_MP select the EDF execution model only when
  * configUSE_EDF == 1U.
  */
-#define configUSE_UP  0U
+#define configUSE_UP  1U
 #define configUSE_MP  0U
 // EDF selection. If 0U, use the stock FreeRTOS fixed-priority scheduler.
-#define configUSE_EDF 0U
+#define configUSE_EDF 1U
 // Uniprocessor scheduling config
-#define configUSE_SRP 0
+#define configUSE_SRP 1
 #define configUSE_CBS 0
 // MP scheduling config
 #define GLOBAL_EDF_ENABLE 0U
@@ -58,19 +58,7 @@
 		#define configCBS_MAX_SERVERS 4U
 	#endif
 
-	/* Legacy CBS job-pool size. CBS currently allows only one active job per
-	 * server and does not maintain a pending-job queue, so 1U is sufficient. */
-	#ifndef configCBS_MAX_PENDING_JOBS
-		#define configCBS_MAX_PENDING_JOBS 1U
-	#endif
-
-	/* Allow budget carryover from one period to the next (0 = no, 1U = yes).
-	 * For simplicity, default is no carryover. */
-	#ifndef configCBS_ALLOW_BUDGET_CARRYOVER
-		#define configCBS_ALLOW_BUDGET_CARRYOVER 0
-	#endif
-
-#endif /* #if ( configUSE_CBS == 1U ) */ 
+#endif /* #if ( configUSE_CBS == 1U ) */
 
 
 /* SRP global resource configuration.
@@ -96,8 +84,8 @@
 /* Shared run-time stack pool used by EDF+SRP stack-sharing support.
  * Size is expressed in StackType_t entries (not bytes).
  * Only used when configUSE_SRP_SHARED_STACKS == 1U. */
-#ifndef configSRP_SHARED_STACK_SIZE
-	#define configSRP_SHARED_STACK_SIZE 2048U
+#ifndef configSRP_STACK_POOL
+	#define configSRP_STACK_POOL 2048U
 #endif
 
 /* Guard words reserved below each SRP shared-stack region.

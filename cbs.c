@@ -107,10 +107,7 @@ CBS_Server_t * xCBSServerCreate(
     pxNewServer->xPeriodTicks = xPeriodTicks;
     pxNewServer->xAbsDeadline = xTaskGetTickCount() + xPeriodTicks;
     pxNewServer->xRemainingBudget = xCapacityTicks;
-    pxNewServer->xLastReplenishTime = xTaskGetTickCount();
     pxNewServer->uxServerID = uxCBSServerCount;
-    pxNewServer->uxTotalJobsSubmitted = 0;
-    pxNewServer->uxTotalJobsCompleted = 0;
     pxNewServer->xJobRunning = pdFALSE;
     pxNewServer->uxIntegrityTag = CBS_SERVER_INTEGRITY_TAG;
 
@@ -130,34 +127,6 @@ CBS_Server_t * xCBSServerCreate(
     uxCBSServerCount++;
 
     return pxNewServer;
-}
-
-void vCBSServerDelete( CBS_Server_t *pxServer )
-{
-    if( pxServer == NULL )
-    {
-        return;
-    }
-
-    configASSERT( pxServer->uxIntegrityTag == CBS_SERVER_INTEGRITY_TAG );
-
-    /* Remove from active servers list */
-    for( UBaseType_t ux = 0; ux < uxCBSServerCount; ux++ )
-    {
-        if( pxCBSServers[ ux ] == pxServer )
-        {
-            /* Shift remaining servers down */
-            for( UBaseType_t uy = ux; uy < ( uxCBSServerCount - 1 ); uy++ )
-            {
-                pxCBSServers[ uy ] = pxCBSServers[ uy + 1 ];
-            }
-            uxCBSServerCount--;
-            break;
-        }
-    }
-
-    pxServer->uxIntegrityTag = ( UBaseType_t ) 0U;
-    vPortFree( pxServer );
 }
 
 /* ============================================================================
@@ -198,6 +167,7 @@ BaseType_t xCBSSubmitJob(
         }
     }
 
+    // Ensure that the task is subscribed to this sever. 
     if( pxTaskCBSGetServer( xTask ) != pxServer )
     {
         return pdFAIL;
@@ -212,9 +182,9 @@ BaseType_t xCBSSubmitJob(
 
     if( prvCBSShouldResetOnIdleArrival( pxServer, xArrivalTime ) != pdFALSE )
     {
+        // when the server is sitting idle and gets a job all of a sudden 
         pxServer->xRemainingBudget = pxServer->xCapacityTicks;
         pxServer->xAbsDeadline = xArrivalTime + pxServer->xPeriodTicks;
-        pxServer->xLastReplenishTime = xArrivalTime;
         xDeadlineUpdated = pdTRUE;
     }
 
@@ -236,7 +206,6 @@ BaseType_t xCBSSubmitJob(
     }
 
     pxServer->xJobRunning = pdTRUE;
-    pxServer->uxTotalJobsSubmitted++;
 
     /* Dispatch immediately by notifying the worker to run one job. */
     ( void ) xTaskNotifyGive( xTask );
@@ -246,6 +215,7 @@ BaseType_t xCBSSubmitJob(
 
 BaseType_t xCBSWaitForJob( TickType_t xTicksToWait )
 {
+    // how an a periodic job can "submit" a job to the server so the server just waits until a job notifies it. 
     return ( ulTaskNotifyTake( pdTRUE, xTicksToWait ) > 0U ) ? pdTRUE : pdFALSE;
 }
 
@@ -269,7 +239,6 @@ BaseType_t xCBSCompleteJob( void )
 
     ( void ) xTaskCBSSetOutstandingJob( xTask, pdFALSE );
     pxServer->xJobRunning = pdFALSE;
-    pxServer->uxTotalJobsCompleted++;
 
     return pdPASS;
 }
@@ -277,31 +246,6 @@ BaseType_t xCBSCompleteJob( void )
 /* ============================================================================
  * CBS Budget Management
  * ============================================================================ */
-
-BaseType_t xCBSConsumeBudget(
-    CBS_Server_t *pxServer,
-    TickType_t ulTicksUsed
-)
-{
-    if( pxServer == NULL )
-    {
-        return pdFALSE;
-    }
-
-    configASSERT( pxServer->uxIntegrityTag == CBS_SERVER_INTEGRITY_TAG );
-
-    /* Check if budget is sufficient */
-    if( pxServer->xRemainingBudget < ulTicksUsed )
-    {
-        /* Budget exhausted or insufficient */
-        pxServer->xRemainingBudget = ( TickType_t ) 0U;
-        return pdFALSE;
-    }
-
-    pxServer->xRemainingBudget -= ulTicksUsed;
-
-    return pdTRUE;
-}
 
 void vCBSReplenishBudget( CBS_Server_t *pxServer )
 {
@@ -313,21 +257,8 @@ void vCBSReplenishBudget( CBS_Server_t *pxServer )
     configASSERT( pxServer->uxIntegrityTag == CBS_SERVER_INTEGRITY_TAG );
 
     /* Replenish budget and update deadline */
-    pxServer->xLastReplenishTime = xTaskGetTickCount();
     pxServer->xRemainingBudget = pxServer->xCapacityTicks;
     pxServer->xAbsDeadline = pxServer->xAbsDeadline + pxServer->xPeriodTicks;
-}
-
-BaseType_t xCBSIsBudgetExhausted( CBS_Server_t *pxServer )
-{
-    if( pxServer == NULL )
-    {
-        return pdTRUE;
-    }
-
-    configASSERT( pxServer->uxIntegrityTag == CBS_SERVER_INTEGRITY_TAG );
-
-    return ( pxServer->xRemainingBudget == 0 ) ? pdTRUE : pdFALSE;
 }
 
 UBaseType_t uxCBSServerUtilization( CBS_Server_t *pxServer )
@@ -378,26 +309,6 @@ void vCBSInit( void )
     xCBSInitialised = pdTRUE;
 
     memset( pxCBSServers, 0, sizeof( pxCBSServers ) );
-}
-
-void vCBSDeinit( void )
-{
-    /* Clean up all servers */
-    for( UBaseType_t ux = 0; ux < uxCBSServerCount; ux++ )
-    {
-        if( pxCBSServers[ ux ] != NULL )
-        {
-            vCBSServerDelete( pxCBSServers[ ux ] );
-        }
-    }
-
-    uxCBSServerCount = 0;
-    xCBSInitialised = pdFALSE;
-}
-
-BaseType_t xCBSIsTaskManaged( TaskHandle_t xTask )
-{
-    return xTaskCBSIsManaged( xTask );
 }
 
 #if ( configUSE_SRP == 0 )

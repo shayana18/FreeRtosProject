@@ -18,6 +18,8 @@
 #define TRACE_WCET_OVERRUN_EVENT_CAPACITY 8u
 #define TRACE_MP_OVERRUN_EVENT_CAPACITY   8u
 
+#define IS_BIT_SET(val, bit_pos) (((val) & (1U << (bit_pos))) != 0U)
+
 static volatile uint32_t ulDeadlineMissHoldTicks = 0u;
 
 typedef struct xTRACE_DEADLINE_MISS_EVENT
@@ -241,27 +243,28 @@ void vTraceWriteTaskCode( uint32_t ulTaskCode )
 {
 #if ( configUSE_MP == 1 ) && ( configNUMBER_OF_CORES > 1 )
     const uint32_t ulCode = ulTaskCode & 0x7u;
-
+	// for MP we partition the gpios to avoid race conditions between the cores 
+	// this prevents cores from attempting to write the same pins 
     if( portGET_CORE_ID() == 0 )
     {
-        gpio_put( TRACE_CORE0_TASK_PIN0, ( ulCode & 0x1u ) != 0u );
-        gpio_put( TRACE_CORE0_TASK_PIN1, ( ulCode & 0x2u ) != 0u );
-        gpio_put( TRACE_CORE0_TASK_PIN2, ( ulCode & 0x4u ) != 0u );
+        gpio_put( TRACE_CORE0_TASK_PIN0, IS_BIT_SET( ulCode, 0 ) );
+        gpio_put( TRACE_CORE0_TASK_PIN1, IS_BIT_SET( ulCode, 1 ) );
+        gpio_put( TRACE_CORE0_TASK_PIN2, IS_BIT_SET( ulCode, 2 ) );
     }
     else
     {
-        gpio_put( TRACE_CORE1_TASK_PIN0, ( ulCode & 0x1u ) != 0u );
-        gpio_put( TRACE_CORE1_TASK_PIN1, ( ulCode & 0x2u ) != 0u );
-        gpio_put( TRACE_CORE1_TASK_PIN2, ( ulCode & 0x4u ) != 0u );
+        gpio_put( TRACE_CORE1_TASK_PIN0, IS_BIT_SET( ulCode, 0 ) );
+        gpio_put( TRACE_CORE1_TASK_PIN1, IS_BIT_SET( ulCode, 1 ) );
+        gpio_put( TRACE_CORE1_TASK_PIN2, IS_BIT_SET( ulCode, 2 ) );
     }
 #else
-    gpio_put( TRACE_TASK_PIN0, ( ulTaskCode & 0x1u ) != 0u );
-    gpio_put( TRACE_TASK_PIN1, ( ulTaskCode & 0x2u ) != 0u );
-    gpio_put( TRACE_TASK_PIN2, ( ulTaskCode & 0x4u ) != 0u );
-    gpio_put( TRACE_TASK_PIN3, ( ulTaskCode & 0x8u ) != 0u );
-    gpio_put( TRACE_TASK_PIN4, ( ulTaskCode & 0x10u ) != 0u );
-    gpio_put( TRACE_TASK_PIN5, ( ulTaskCode & 0x20u ) != 0u );
-    gpio_put( TRACE_TASK_PIN6, ( ulTaskCode & 0x40u ) != 0u );
+    gpio_put( TRACE_TASK_PIN0, IS_BIT_SET( ulTaskCode, 0 ) );
+    gpio_put( TRACE_TASK_PIN1, IS_BIT_SET( ulTaskCode, 1 ) );
+    gpio_put( TRACE_TASK_PIN2, IS_BIT_SET( ulTaskCode, 2 ) );
+    gpio_put( TRACE_TASK_PIN3, IS_BIT_SET( ulTaskCode, 3 ) );
+    gpio_put( TRACE_TASK_PIN4, IS_BIT_SET( ulTaskCode, 4 ) );
+    gpio_put( TRACE_TASK_PIN5, IS_BIT_SET( ulTaskCode, 5 ) );
+    gpio_put( TRACE_TASK_PIN6, IS_BIT_SET( ulTaskCode, 6 ) );
 #endif
 }
 

@@ -204,7 +204,7 @@ typedef struct xTASK_DEBUG_SNAPSHOT
         TickType_t xAbsDeadline;
     #endif
     #if ( ( configUSE_EDF == 1 ) && ( configUSE_UP == 1 ) && ( configUSE_SRP == 1 ) )
-        UBaseType_t uxPriorityCeiling;
+        UBaseType_t uxPreemptionLevel;
         configSTACK_DEPTH_TYPE uxStackDepthWords;
     #endif
 } TaskDebugSnapshot_t;
@@ -503,8 +503,6 @@ typedef enum
 
     BaseType_t xTaskCBSBindToServer( TaskHandle_t xTask,
                                      void * pvCBSServer ) PRIVILEGED_FUNCTION;
-    BaseType_t xTaskCBSUnbindFromServer( TaskHandle_t xTask ) PRIVILEGED_FUNCTION;
-    BaseType_t xTaskCBSIsManaged( TaskHandle_t xTask ) PRIVILEGED_FUNCTION;
     BaseType_t xTaskCBSHasOutstandingJob( TaskHandle_t xTask ) PRIVILEGED_FUNCTION;
     BaseType_t xTaskCBSSetOutstandingJob( TaskHandle_t xTask,
                                           BaseType_t xOutstanding ) PRIVILEGED_FUNCTION;
